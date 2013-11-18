@@ -1656,7 +1656,7 @@ static int synaptics_ts_stop(struct synaptics_ts_data *ts)
 	if (!prevent_sleep)
 #endif
 	{
-		disable_irq(ts->client->irq);
+		disable_irq_nosync(ts->client->irq);
 		cancel_delayed_work_sync(&ts->work_init);
 		release_all_ts_event(ts);
 		touch_power_cntl(ts, POWER_OFF);
