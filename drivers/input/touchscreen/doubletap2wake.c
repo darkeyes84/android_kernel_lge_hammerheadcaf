@@ -36,6 +36,7 @@
 #endif
 #include <linux/hrtimer.h>
 #include <asm-generic/cputime.h>
+#include <linux/wakelock.h>
 
 /* uncomment since no touchscreen defines android touch, do that here */
 //#define ANDROID_TOUCH_DECLARED
@@ -60,12 +61,13 @@ MODULE_LICENSE("GPLv2");
 #define DT2W_TIME           600
 #define VIB_STRENGTH		20
 
+static struct wake_lock dt2w_wakelock;
 extern void set_vibrate(int value);
 int vib_strength = VIB_STRENGTH;
 
 /* Resources */
 int dt2w_switch = DT2W_DEFAULT;
-static cputime64_t tap_time_pre = 0;
+static unsigned long long tap_time_pre = 0;
 static int touch_x = 0, touch_y = 0, touch_nr = 0, x_pre = 0, y_pre = 0;
 static bool touch_x_called = false, touch_y_called = false, touch_cnt = true;
 static bool scr_suspended = false, exec_count = true;
@@ -100,6 +102,8 @@ __setup("dt2w=", read_dt2w_cmdline);
 
 /* reset on finger release */
 static void doubletap2wake_reset(void) {
+	if (wake_lock_active(&dt2w_wakelock))
+		wake_unlock(&dt2w_wakelock);
 	exec_count = true;
 	touch_nr = 0;
 	tap_time_pre = 0;
@@ -140,10 +144,11 @@ static unsigned int calc_feather(int coord, int prev_coord) {
 
 /* init a new touch */
 static void new_touch(int x, int y) {
-	tap_time_pre = ktime_to_ms(ktime_get());
+	tap_time_pre = jiffies;
 	x_pre = x;
 	y_pre = y;
 	touch_nr++;
+	wake_lock_timeout(&dt2w_wakelock, HZ/2);
 }
 
 /* Doubletap2wake main function */
@@ -151,8 +156,8 @@ static void detect_doubletap2wake(int x, int y, bool st)
 {
         bool single_touch = st;
 #if DT2W_DEBUG
-        pr_info(LOGTAG"x,y(%4d,%4d) single:%s\n",
-                x, y, (single_touch) ? "true" : "false");
+        pr_info(LOGTAG"x,y(%4d,%4d) tap_time_pre:%llu\n",
+                x, y, tap_time_pre);
 #endif
 	if (x < 100 || x > 980)
         	return;
@@ -168,7 +173,7 @@ static void detect_doubletap2wake(int x, int y, bool st)
 		} else if (touch_nr == 1) {
 			if ((calc_feather(x, x_pre) < DT2W_FEATHER) &&
 			    (calc_feather(y, y_pre) < DT2W_FEATHER) &&
-			    ((ktime_to_ms(ktime_get())-tap_time_pre) < DT2W_TIME))
+			    ((jiffies-tap_time_pre) < DT2W_TIME))
 				touch_nr++;
 
 			else {
@@ -215,6 +220,7 @@ static void dt2w_input_event(struct input_handle *handle, unsigned int type,
 
 	if (code == ABS_MT_TRACKING_ID && value == -1) {
 		touch_cnt = true;
+		queue_work_on(0, dt2w_input_wq, &dt2w_input_work);
 		return;
 	}
 
@@ -226,12 +232,6 @@ static void dt2w_input_event(struct input_handle *handle, unsigned int type,
 	if (code == ABS_MT_POSITION_Y) {
 		touch_y = value;
 		touch_y_called = true;
-	}
-
-	if (touch_x_called || touch_y_called) {
-		touch_x_called = false;
-		touch_y_called = false;
-		queue_work_on(0, dt2w_input_wq, &dt2w_input_work);
 	}
 }
 
@@ -431,6 +431,8 @@ static int __init doubletap2wake_init(void)
 	rc = input_register_handler(&dt2w_input_handler);
 	if (rc)
 		pr_err("%s: Failed to register dt2w_input_handler\n", __func__);
+
+	wake_lock_init(&dt2w_wakelock, WAKE_LOCK_SUSPEND, "dt2w_wakelock");
 
 #ifndef CONFIG_HAS_EARLYSUSPEND
 	dt2w_lcd_notif.notifier_call = lcd_notifier_callback;
