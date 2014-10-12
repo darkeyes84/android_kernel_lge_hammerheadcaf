@@ -23,5 +23,6 @@
 
 extern int dt2w_switch;
 extern int vib_strength;
+void wake_pwrtrigger(void);
 
 #endif	/* _LINUX_DOUBLETAP2WAKE_H */
