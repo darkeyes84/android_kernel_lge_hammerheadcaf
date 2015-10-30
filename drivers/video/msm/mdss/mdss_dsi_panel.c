@@ -21,13 +21,19 @@
 #include <linux/leds.h>
 #include <linux/qpnp/pwm.h>
 #include <linux/err.h>
+
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 static bool gpio_overide = false;
+
+#ifdef CONFIG_DEBUG_FS
+#include <linux/debugfs.h>
+#include <linux/ctype.h>
+#endif
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 #ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
 #include <linux/input/doubletap2wake.h>
 #endif
 #endif
-
 #include <asm/system_info.h>
 
 #include "mdss_dsi.h"
@@ -259,6 +265,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
 	int i, rc = 0;
+
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 #ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
 	bool prevent_sleep = false;
@@ -331,6 +338,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_debug("%s: Reset panel done\n", __func__);
 		}
 	} else {
+
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 		if (!prevent_sleep) {
 			gpio_overide = false;
@@ -339,6 +347,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 				gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 				gpio_free(ctrl_pdata->disp_en_gpio);
 			}
+
 
 			if (pinfo->off_pre_rst_delay) {
 				pr_debug("%s: off_pre_rst_delay:%d\n",
@@ -353,7 +362,8 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 				pr_debug("%s: off_post_rst_delay:%d\n",
 						__func__, pinfo->off_post_rst_delay);
 				usleep(pinfo->off_post_rst_delay * 1000);
-			}
+
+		} else {
 
 			if (gpio_is_valid(ctrl_pdata->mode_gpio))
 				gpio_free(ctrl_pdata->mode_gpio);
@@ -651,6 +661,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	}
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
+
 
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 	if (prevent_sleep) {
