@@ -1708,7 +1708,7 @@ static int lcd_notifier_callback(struct notifier_block *this,
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 		if (!prevent_sleep)
 #endif
-		}
+		{
 			synaptics_ts_stop(ts);
 			mutex_unlock(&ts->input_dev->mutex);
 		}
