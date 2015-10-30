@@ -66,9 +66,11 @@ static cputime64_t tap_time_pre = 0;
 static int touch_x = 0, touch_y = 0, touch_nr = 0, x_pre = 0, y_pre = 0;
 static bool touch_x_called = false, touch_y_called = false, touch_cnt = true;
 static bool scr_suspended = false, exec_count = true;
+
 #ifndef CONFIG_HAS_EARLYSUSPEND
 static struct notifier_block dt2w_lcd_notif;
 #endif
+
 static struct input_dev * doubletap2wake_pwrdev;
 static DEFINE_MUTEX(pwrkeyworklock);
 static struct workqueue_struct *dt2w_input_wq;
@@ -129,13 +131,6 @@ static unsigned int calc_feather(int coord, int prev_coord) {
 	return calc_coord;
 }
 
-/* init a new touch */
-static void new_touch(int x, int y) {
-	tap_time_pre = ktime_to_ms(ktime_get());
-	x_pre = x;
-	y_pre = y;
-	touch_nr++;
-}
 
 /* Doubletap2wake main function */
 static void detect_doubletap2wake(int x, int y, bool st)
@@ -148,19 +143,26 @@ static void detect_doubletap2wake(int x, int y, bool st)
 	if ((single_touch) && (dt2w_switch > 0) && (exec_count) && (touch_cnt)) {
 		touch_cnt = false;
 		if (touch_nr == 0) {
-			new_touch(x, y);
+
+			tap_time_pre = ktime_to_ms(ktime_get());
+			x_pre = x;
+			y_pre = y;
+			touch_nr++;
+
 		} else if (touch_nr == 1) {
 			if ((calc_feather(x, x_pre) < DT2W_FEATHER) &&
 			    (calc_feather(y, y_pre) < DT2W_FEATHER) &&
 			    ((ktime_to_ms(ktime_get())-tap_time_pre) < DT2W_TIME))
 				touch_nr++;
-			else {
+
+			else
 				doubletap2wake_reset();
-				new_touch(x, y);
-			}
 		} else {
 			doubletap2wake_reset();
-			new_touch(x, y);
+			tap_time_pre = ktime_to_ms(ktime_get());
+			x_pre = x;
+			y_pre = y;
+			touch_nr++;
 		}
 		if ((touch_nr > 1)) {
 			pr_info(LOGTAG"ON\n");
