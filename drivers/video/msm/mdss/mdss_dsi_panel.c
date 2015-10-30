@@ -23,18 +23,18 @@
 #include <linux/err.h>
 
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+#include <linux/input/prevent_sleep.h>
 static bool gpio_overide = false;
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+#include <linux/input/doubletap2wake.h>
+#endif
+#endif
 
 #ifdef CONFIG_DEBUG_FS
 #include <linux/debugfs.h>
 #include <linux/ctype.h>
 #endif
-#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
-#include <linux/input/prevent_sleep.h>
-#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
-#include <linux/input/doubletap2wake.h>
-#endif
-#endif
+
 
 #include <asm/system_info.h>
 
@@ -376,8 +376,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 				pr_debug("%s: off_post_rst_delay:%d\n",
 						__func__, pinfo->off_post_rst_delay);
 				usleep(pinfo->off_post_rst_delay * 1000);
-
-		} else {
+			}
 
 			if (gpio_is_valid(ctrl_pdata->mode_gpio))
 				gpio_free(ctrl_pdata->mode_gpio);
@@ -673,6 +672,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		prevent_sleep = false;
 #endif
 
+	struct mdss_panel_info *pinfo;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
