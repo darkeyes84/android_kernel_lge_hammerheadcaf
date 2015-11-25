@@ -1070,4 +1070,8 @@ config STATE_NOTIFIER
         bool "State Notifier"
 	default y
 
+config PWRKEY_SUSPEND
+	tristate "Suspend touch wake if power button pressed"
+	default y
+
 endif
