@@ -59,6 +59,7 @@
 #define QSEOS_CHECK_VERSION_CMD		0x00001803
 
 #define QSEE_CE_CLK_100MHZ		100000000
+#define CE_CLK_DIV			1000000
 
 #define QSEECOM_MAX_SG_ENTRY	512
 #define QSEECOM_INVALID_KEY_ID  0xff
@@ -72,7 +73,7 @@
 #define RPMB_SERVICE			0x2000
 
 #define QSEECOM_SEND_CMD_CRYPTO_TIMEOUT	2000
-#define QSEECOM_LOAD_APP_CRYPTO_TIMEOUT	2000
+#define QSEECOM_LOAD_APP_CRYPTO_TIMEOUT	4000
 
 enum qseecom_clk_definitions {
 	CLK_DFAB = 0,
@@ -126,9 +127,10 @@ struct qseecom_registered_kclient_list {
 
 struct ce_hw_usage_info {
 	uint32_t  qsee_ce_hw_instance;
-	uint32_t  hlos_ce_hw_instance;
+	uint32_t  *hlos_ce_hw_instance;
 	uint32_t  disk_encrypt_pipe;
 	uint32_t  file_encrypt_pipe;
+	uint32_t  hlos_num_ce_hw_instances;
 };
 
 struct qseecom_clk {
@@ -177,6 +179,7 @@ struct qseecom_control {
 	struct work_struct bw_inactive_req_ws;
 	struct cdev cdev;
 	bool timer_running;
+	unsigned int ce_opp_freq_hz;
 	bool appsbl_qseecom_support;
 };
 
@@ -209,20 +212,6 @@ struct qseecom_dev_handle {
 	bool  perf_enabled;
 	bool  fast_load_enabled;
 	enum qseecom_bandwidth_request_mode mode;
-};
-
-enum qseecom_set_clear_key_flag {
-	QSEECOM_CLEAR_CE_KEY_CMD = 0,
-	QSEECOM_SET_CE_KEY_CMD,
-};
-
-struct qseecom_set_key_parameter {
-	uint32_t ce_hw;
-	uint32_t pipe;
-	uint32_t flags;
-	uint8_t key_id[QSEECOM_KEY_ID_SIZE];
-	unsigned char hash32[QSEECOM_HASH_SIZE];
-	enum qseecom_set_clear_key_flag set_clear_key_flag;
 };
 
 struct qseecom_sg_entry {
@@ -512,7 +501,8 @@ static void qseecom_bw_inactive_req_work(struct work_struct *work)
 {
 	mutex_lock(&app_access_lock);
 	mutex_lock(&qsee_bw_mutex);
-	__qseecom_set_msm_bus_request(INACTIVE);
+	if (qseecom.timer_running)
+		__qseecom_set_msm_bus_request(INACTIVE);
 	pr_debug("current_mode = %d, cumulative_mode = %d\n",
 				qseecom.current_mode, qseecom.cumulative_mode);
 	qseecom.timer_running = false;
@@ -750,6 +740,12 @@ static int qseecom_set_client_mem_param(struct qseecom_dev_handle *data,
 			ret);
 		return ret;
 	}
+
+	if (len < req.sb_len) {
+		pr_err("Requested length (0x%x) is > allocated (0x%x)\n",
+			req.sb_len, len);
+		return -EINVAL;
+	}
 	/* Populate the structure for sending scm call to load image */
 	data->client.sb_virt = (char *) ion_map_kernel(qseecom.ion_clnt,
 							data->client.ihandle);
@@ -764,6 +760,48 @@ static int __qseecom_listener_has_sent_rsp(struct qseecom_dev_handle *data)
 	int ret;
 	ret = (qseecom.send_resp_flag != 0);
 	return ret || data->abort;
+}
+
+static int __qseecom_qseos_fail_return_resp_tz(struct qseecom_dev_handle *data,
+					struct qseecom_command_scm_resp *resp,
+			struct qseecom_client_listener_data_irsp *send_data_rsp,
+			struct qseecom_registered_listener_list *ptr_svc,
+							uint32_t lstnr) {
+	int ret = 0;
+	send_data_rsp->status = QSEOS_RESULT_FAILURE;
+	qseecom.send_resp_flag = 0;
+	send_data_rsp->qsee_cmd_id = QSEOS_LISTENER_DATA_RSP_COMMAND;
+	send_data_rsp->listener_id = lstnr;
+
+	if (ptr_svc)
+		pr_warn("listener_id:%x, lstnr: %x\n",
+					ptr_svc->svc.listener_id, lstnr);
+
+	if (ptr_svc && ptr_svc->ihandle)
+		msm_ion_do_cache_op(qseecom.ion_clnt, ptr_svc->ihandle,
+					ptr_svc->sb_virt, ptr_svc->sb_length,
+					ION_IOC_CLEAN_INV_CACHES);
+	if (lstnr == RPMB_SERVICE)
+		__qseecom_enable_clk(CLK_QSEE);
+
+	ret = scm_call(SCM_SVC_TZSCHEDULER, 1, send_data_rsp,
+				sizeof(send_data_rsp), resp, sizeof(*resp));
+	if (ret) {
+		pr_err("scm_call() failed with err: %d (app_id = %d)\n",
+						ret, data->client.app_id);
+		if (lstnr == RPMB_SERVICE)
+			__qseecom_disable_clk(CLK_QSEE);
+		return ret;
+	}
+	if ((resp->result != QSEOS_RESULT_SUCCESS) &&
+			(resp->result != QSEOS_RESULT_INCOMPLETE)) {
+		pr_err("fail:resp res= %d,app_id = %d,lstr = %d\n",
+				resp->result, data->client.app_id, lstnr);
+		ret = -EINVAL;
+	}
+	if (lstnr == RPMB_SERVICE)
+		__qseecom_disable_clk(CLK_QSEE);
+	return ret;
 }
 
 static int __qseecom_process_incomplete_cmd(struct qseecom_dev_handle *data,
@@ -798,14 +836,25 @@ static int __qseecom_process_incomplete_cmd(struct qseecom_dev_handle *data,
 
 		if (ptr_svc == NULL) {
 			pr_err("Listener Svc %d does not exist\n", lstnr);
+			__qseecom_qseos_fail_return_resp_tz(data, resp,
+					&send_data_rsp, ptr_svc, lstnr);
 			return -EINVAL;
 		}
+
+		if (!ptr_svc->ihandle) {
+			pr_err("Client handle is not initialized\n");
+			__qseecom_qseos_fail_return_resp_tz(data, resp,
+					&send_data_rsp, ptr_svc, lstnr);
+			return -EINVAL;
+		}
+
 		if (ptr_svc->svc.listener_id != lstnr) {
-			pr_warning("Service requested for does on exist\n");
+			pr_warn("Service requested does not exist\n");
+			__qseecom_qseos_fail_return_resp_tz(data, resp,
+					&send_data_rsp, ptr_svc, lstnr);
 			return -ERESTARTSYS;
 		}
-		pr_debug("waking up rcv_req_wq and "
-				"waiting for send_resp_wq\n");
+		pr_debug("waking up rcv_req_wq and waiting for send_resp_wq\n");
 
 		/* initialize the new signal mask with all signals*/
 		sigfillset(&new_sigset);
@@ -831,7 +880,7 @@ static int __qseecom_process_incomplete_cmd(struct qseecom_dev_handle *data,
 
 		qseecom.send_resp_flag = 0;
 		send_data_rsp.qsee_cmd_id = QSEOS_LISTENER_DATA_RSP_COMMAND;
-		send_data_rsp.listener_id  = lstnr ;
+		send_data_rsp.listener_id  = lstnr;
 		if (ptr_svc)
 			msm_ion_do_cache_op(qseecom.ion_clnt, ptr_svc->ihandle,
 					ptr_svc->sb_virt, ptr_svc->sb_length,
@@ -1115,7 +1164,7 @@ static int qseecom_unload_app(struct qseecom_dev_handle *data,
 
 	if (!memcmp(data->client.app_name, "keymaste", strlen("keymaste"))) {
 		pr_debug("Do not unload keymaster app from tz\n");
-		goto unload_exit;
+		goto free_app_memory;
 	}
 
 	if (data->client.app_id > 0) {
@@ -1210,7 +1259,7 @@ static int qseecom_unload_app(struct qseecom_dev_handle *data,
 		spin_unlock_irqrestore(&qseecom.registered_app_list_lock,
 								flags1);
 	}
-unload_exit:
+free_app_memory:
 	qseecom_unmap_ion_allocated_memory(data);
 	data->released = true;
 	return ret;
@@ -1253,6 +1302,7 @@ int __qseecom_process_rpmb_svc_cmd(struct qseecom_dev_handle *data_ptr,
 		pr_err("cmd buf not pointing to base offset of shared buffer\n");
 		return -EINVAL;
 	}
+
 
 	if (((uint32_t)req_ptr->resp_buf < data_ptr->client.user_virt_sb_base)
 			|| ((uint32_t)req_ptr->resp_buf >=
@@ -1308,6 +1358,11 @@ static int qseecom_send_service_cmd(struct qseecom_dev_handle *data,
 
 	if (data->client.sb_length == 0) {
 		pr_err("sb_length is 0\n");
+		return -EINVAL;
+	}
+
+	if (!data || !data->client.ihandle) {
+		pr_err("Client or client handle is not initialized\n");
 		return -EINVAL;
 	}
 
@@ -1394,6 +1449,7 @@ exit:
 
 static int __validate_send_cmd_inputs(struct qseecom_dev_handle *data,
 				struct qseecom_send_cmd_req *req)
+
 {
 	if (!data || !data->client.ihandle) {
 		pr_err("Client or client handle is not initialized\n");
@@ -1410,10 +1466,10 @@ static int __validate_send_cmd_inputs(struct qseecom_dev_handle *data,
 		pr_err("cmd buffer address not within shared bufffer\n");
 		return -EINVAL;
 	}
-	if (((uintptr_t)req->resp_buf <
-				data->client.user_virt_sb_base)  ||
-		((uintptr_t)req->resp_buf >=
-		(data->client.user_virt_sb_base + data->client.sb_length))) {
+
+	if (((uint32_t)req->resp_buf < data->client.user_virt_sb_base)  ||
+		((uint32_t)req->resp_buf >= (data->client.user_virt_sb_base +
+					data->client.sb_length))){
 		pr_err("response buffer address not within shared bufffer\n");
 		return -EINVAL;
 	}
@@ -1429,8 +1485,8 @@ static int __validate_send_cmd_inputs(struct qseecom_dev_handle *data,
 	}
 
 	if ((req->cmd_req_len + req->resp_len) > data->client.sb_length) {
-		pr_debug("Not enough memory to fit cmd_buf.\n");
-		pr_debug("resp_buf. Required: %u, Available: %zu\n",
+		pr_debug("Not enough memory to fit cmd_buf and "
+			"resp_buf. Required: %u, Available: %u\n",
 				(req->cmd_req_len + req->resp_len),
 					data->client.sb_length);
 		return -ENOMEM;
@@ -1491,6 +1547,11 @@ static int __qseecom_send_cmd(struct qseecom_dev_handle *data,
 	if (!found_app) {
 		pr_err("app_id %d (%s) is not found\n", data->client.app_id,
 			(char *)data->client.app_name);
+		return -EINVAL;
+	}
+
+	if (!data || !data->client.ihandle) {
+		pr_err("Client or client handle is not initialized\n");
 		return -EINVAL;
 	}
 
@@ -1584,6 +1645,7 @@ int __boundary_checks_offset(struct qseecom_send_modfd_cmd_req *cmd_req,
 }
 
 #define SG_ENTRY_SZ   sizeof(struct qseecom_sg_entry)
+
 static int __qseecom_update_cmd_buf(void *msg, bool cleanup,
 					struct qseecom_dev_handle *data,
 					bool listener_svc)
@@ -1684,7 +1746,7 @@ static int __qseecom_update_cmd_buf(void *msg, bool cleanup,
 				}
 			} else if ((listener_svc) &&
 					(lstnr_resp->ifd_data[i].fd > 0)) {
-				if ((lstnr_resp->resp_len <
+					if ((lstnr_resp->resp_len <
 					SG_ENTRY_SZ * sg_ptr->nents) ||
 					(lstnr_resp->ifd_data[i].cmd_buf_offset >
 					(lstnr_resp->resp_len -
@@ -2185,7 +2247,12 @@ int qseecom_start_app(struct qseecom_handle **handle,
 	uint32_t len;
 	ion_phys_addr_t pa;
 
-	if (!app_name || strlen(app_name) >= MAX_APP_NAME_SIZE) {
+	if (!app_name) {
+		pr_err("failed to get the app name\n");
+		return -EINVAL;
+	}
+
+	if (strlen(app_name) >= MAX_APP_NAME_SIZE) {
 		pr_err("The app_name (%s) is not valid\n", app_name);
 		return -EINVAL;
 	}
@@ -2549,7 +2616,7 @@ static int qseecom_send_modfd_resp(struct qseecom_dev_handle *data,
 	}
 	resp.resp_buf_ptr = (uint32_t)this_lstnr->sb_virt +
 		(resp.resp_buf_ptr - this_lstnr->user_virt_sb_base);
-	__qseecom_update_cmd_buf(&resp, false, data, true);
+	__qseecom_update_cmd_buf(&resp, false, data, false);
 	qseecom.send_resp_flag = 1;
 	wake_up_interruptible(&qseecom.send_resp_wq);
 	return 0;
@@ -2576,13 +2643,16 @@ static int qseecom_get_qseos_version(struct qseecom_dev_handle *data,
 static int __qseecom_enable_clk(enum qseecom_ce_hw_instance ce)
 {
 	int rc = 0;
-	struct qseecom_clk *qclk;
+	struct qseecom_clk *qclk = NULL;
 
 	if (ce == CLK_QSEE)
 		qclk = &qseecom.qsee;
-	else
+	if (ce == CLK_CE_DRV)
 		qclk = &qseecom.ce_drv;
-
+	if (qclk == NULL) {
+		pr_err("CLK type not supported\n");
+		return -EINVAL;
+	}
 	mutex_lock(&clk_access_lock);
 
 	if (qclk->clk_access_cnt == ULONG_MAX)
@@ -2595,31 +2665,39 @@ static int __qseecom_enable_clk(enum qseecom_ce_hw_instance ce)
 	}
 
 	/* Enable CE core clk */
-	rc = clk_prepare_enable(qclk->ce_core_clk);
-	if (rc) {
-		pr_err("Unable to enable/prepare CE core clk\n");
-		goto err;
+	if (qclk->ce_core_clk != NULL) {
+		rc = clk_prepare_enable(qclk->ce_core_clk);
+		if (rc) {
+			pr_err("Unable to enable/prepare CE core clk\n");
+			goto err;
+		}
 	}
 	/* Enable CE clk */
-	rc = clk_prepare_enable(qclk->ce_clk);
-	if (rc) {
-		pr_err("Unable to enable/prepare CE iface clk\n");
-		goto ce_clk_err;
+	if (qclk->ce_clk != NULL) {
+		rc = clk_prepare_enable(qclk->ce_clk);
+		if (rc) {
+			pr_err("Unable to enable/prepare CE iface clk\n");
+			goto ce_clk_err;
+		}
 	}
 	/* Enable AXI clk */
-	rc = clk_prepare_enable(qclk->ce_bus_clk);
-	if (rc) {
-		pr_err("Unable to enable/prepare CE bus clk\n");
-		goto ce_bus_clk_err;
+	if (qclk->ce_bus_clk != NULL) {
+		rc = clk_prepare_enable(qclk->ce_bus_clk);
+		if (rc) {
+			pr_err("Unable to enable/prepare CE bus clk\n");
+			goto ce_bus_clk_err;
+		}
 	}
 	qclk->clk_access_cnt++;
 	mutex_unlock(&clk_access_lock);
 	return 0;
 
 ce_bus_clk_err:
-	clk_disable_unprepare(qclk->ce_clk);
+	if (qclk->ce_clk != NULL)
+		clk_disable_unprepare(qclk->ce_clk);
 ce_clk_err:
-	clk_disable_unprepare(qclk->ce_core_clk);
+	if (qclk->ce_core_clk != NULL)
+		clk_disable_unprepare(qclk->ce_core_clk);
 err:
 	mutex_unlock(&clk_access_lock);
 	return -EIO;
@@ -2818,11 +2896,10 @@ static int qseecom_load_external_elf(struct qseecom_dev_handle *data,
 {
 	struct ion_handle *ihandle;	/* Ion handle */
 	struct qseecom_load_img_req load_img_req;
+	int uret = 0;
 	int ret;
-	int set_cpu_ret = 0;
 	ion_phys_addr_t pa = 0;
 	uint32_t len;
-	struct cpumask mask;
 	struct qseecom_load_app_ireq load_req;
 	struct qseecom_command_scm_resp resp;
 
@@ -2854,16 +2931,6 @@ static int qseecom_load_external_elf(struct qseecom_dev_handle *data,
 	load_req.mdt_len = load_img_req.mdt_len;
 	load_req.img_len = load_img_req.img_len;
 	load_req.phy_addr = pa;
-
-	/* SCM_CALL tied to Core0 */
-	mask = CPU_MASK_CPU0;
-	set_cpu_ret = set_cpus_allowed_ptr(current, &mask);
-	if (set_cpu_ret) {
-		pr_err("set_cpus_allowed_ptr failed : ret %d\n",
-				set_cpu_ret);
-		ret = -EFAULT;
-		goto exit_ion_free;
-	}
 
 	if (qseecom.support_bus_scaling) {
 		mutex_lock(&qsee_bw_mutex);
@@ -2920,20 +2987,14 @@ exit_disable_clock:
 exit_register_bus_bandwidth_needs:
 	if (qseecom.support_bus_scaling) {
 		mutex_lock(&qsee_bw_mutex);
-		ret = qseecom_unregister_bus_bandwidth_needs(data);
+		uret = qseecom_unregister_bus_bandwidth_needs(data);
 		mutex_unlock(&qsee_bw_mutex);
+		if (uret)
+			pr_err("Failed to unregister bus bw needs %d, scm_call ret %d\n",
+								uret, ret);
 	}
 
 exit_cpu_restore:
-	/* Restore the CPU mask */
-	mask = CPU_MASK_ALL;
-	set_cpu_ret = set_cpus_allowed_ptr(current, &mask);
-	if (set_cpu_ret) {
-		pr_err("set_cpus_allowed_ptr failed to restore mask: ret %d\n",
-				set_cpu_ret);
-		ret = -EFAULT;
-	}
-exit_ion_free:
 	/* Deallocate the handle */
 	if (!IS_ERR_OR_NULL(ihandle))
 		ion_free(qseecom.ion_clnt, ihandle);
@@ -2943,25 +3004,14 @@ exit_ion_free:
 static int qseecom_unload_external_elf(struct qseecom_dev_handle *data)
 {
 	int ret = 0;
-	int set_cpu_ret = 0;
 	struct qseecom_command_scm_resp resp;
 	struct qseecom_unload_app_ireq req;
-	struct cpumask mask;
 
 	/* unavailable client app */
 	data->type = QSEECOM_UNAVAILABLE_CLIENT_APP;
 
 	/* Populate the structure for sending scm call to unload image */
 	req.qsee_cmd_id = QSEOS_UNLOAD_EXTERNAL_ELF_COMMAND;
-
-	/* SCM_CALL tied to Core0 */
-	mask = CPU_MASK_CPU0;
-	ret = set_cpus_allowed_ptr(current, &mask);
-	if (ret) {
-		pr_err("set_cpus_allowed_ptr failed : ret %d\n",
-				ret);
-		return -EFAULT;
-	}
 
 	/* SCM_CALL to unload the external elf */
 	ret = scm_call(SCM_SVC_TZSCHEDULER, 1,  &req,
@@ -2987,14 +3037,6 @@ static int qseecom_unload_external_elf(struct qseecom_dev_handle *data)
 	}
 
 qseecom_unload_external_elf_scm_err:
-	/* Restore the CPU mask */
-	mask = CPU_MASK_ALL;
-	set_cpu_ret = set_cpus_allowed_ptr(current, &mask);
-	if (set_cpu_ret) {
-		pr_err("set_cpus_allowed_ptr failed to restore mask: ret %d\n",
-				set_cpu_ret);
-		ret = -EFAULT;
-	}
 
 	return ret;
 }
@@ -3080,32 +3122,41 @@ static int qseecom_query_app_loaded(struct qseecom_dev_handle *data,
 
 static int __qseecom_get_ce_pipe_info(
 			enum qseecom_key_management_usage_type usage,
-			uint32_t *pipe, uint32_t *ce_hw)
+			uint32_t *pipe, uint32_t **ce_hw)
 {
-	int ret;
+	int ret, i;
 	switch (usage) {
 	case QSEOS_KM_USAGE_DISK_ENCRYPTION:
 		if (qseecom.support_fde) {
 			*pipe = qseecom.ce_info.disk_encrypt_pipe;
-			*ce_hw = qseecom.ce_info.hlos_ce_hw_instance;
+			for (i = 0;
+				i < qseecom.ce_info.hlos_num_ce_hw_instances;
+				i++) {
+				(*ce_hw)[i] =
+					qseecom.ce_info.hlos_ce_hw_instance[i];
+			}
 			ret = 0;
-
 		} else {
 			pr_err("info unavailable: disk encr pipe %d ce_hw %d\n",
 				qseecom.ce_info.disk_encrypt_pipe,
-				qseecom.ce_info.hlos_ce_hw_instance);
+				qseecom.ce_info.hlos_ce_hw_instance[0]);
 			ret = -EINVAL;
 		}
 		break;
 	case QSEOS_KM_USAGE_FILE_ENCRYPTION:
 		if (qseecom.support_pfe) {
 			*pipe = qseecom.ce_info.file_encrypt_pipe;
-			*ce_hw = qseecom.ce_info.hlos_ce_hw_instance;
+			for (i = 0;
+				i < qseecom.ce_info.hlos_num_ce_hw_instances;
+				i++) {
+				(*ce_hw)[i] =
+					qseecom.ce_info.hlos_ce_hw_instance[i];
+			}
 			ret = 0;
 		} else {
 			pr_err("info unavailable: file encr pipe %d ce_hw %d\n",
 				qseecom.ce_info.file_encrypt_pipe,
-				qseecom.ce_info.hlos_ce_hw_instance);
+				qseecom.ce_info.hlos_ce_hw_instance[0]);
 			ret = -EINVAL;
 		}
 		break;
@@ -3134,9 +3185,15 @@ static int __qseecom_generate_and_save_key(struct qseecom_dev_handle *data,
 				ireq, sizeof(struct qseecom_key_generate_ireq),
 				&resp, sizeof(resp));
 	if (ret) {
-		pr_err("scm call to generate key failed : %d\n", ret);
-		__qseecom_disable_clk(CLK_QSEE);
-		return -EFAULT;
+		if (ret == -EINVAL &&
+			resp.result == QSEOS_RESULT_FAIL_KEY_ID_EXISTS) {
+			pr_debug("Key ID exists.\n");
+			ret = 0;
+		} else {
+			pr_err("scm call to generate key failed : %d\n", ret);
+			ret = -EFAULT;
+		}
+		goto generate_key_exit;
 	}
 
 	switch (resp.result) {
@@ -3163,6 +3220,7 @@ static int __qseecom_generate_and_save_key(struct qseecom_dev_handle *data,
 		ret = -EINVAL;
 		break;
 	}
+generate_key_exit:
 	__qseecom_disable_clk(CLK_QSEE);
 	return ret;
 }
@@ -3176,19 +3234,24 @@ static int __qseecom_delete_saved_key(struct qseecom_dev_handle *data,
 
 	if (usage < QSEOS_KM_USAGE_DISK_ENCRYPTION ||
 		usage >= QSEOS_KM_USAGE_MAX) {
-			pr_err("Error:: unsupported usage %d\n", usage);
-			return -EFAULT;
+		pr_err("Error:: unsupported usage %d\n", usage);
+		return -EFAULT;
 	}
-
 	__qseecom_enable_clk(CLK_QSEE);
 
 	ret = scm_call(SCM_SVC_TZSCHEDULER, 1,
 				ireq, sizeof(struct qseecom_key_delete_ireq),
 				&resp, sizeof(struct qseecom_command_scm_resp));
 	if (ret) {
-		pr_err("scm call to delete key failed : %d\n", ret);
-		__qseecom_disable_clk(CLK_QSEE);
-		return -EFAULT;
+		if (ret == -EINVAL &&
+			resp.result == QSEOS_RESULT_FAIL_MAX_ATTEMPT) {
+			pr_debug("Max attempts to input password reached.\n");
+			ret = -ERANGE;
+		} else {
+			pr_err("scm call to delete key failed : %d\n", ret);
+			ret = -EFAULT;
+		}
+		goto del_key_exit;
 	}
 
 	switch (resp.result) {
@@ -3216,6 +3279,7 @@ static int __qseecom_delete_saved_key(struct qseecom_dev_handle *data,
 		ret = -EINVAL;
 		break;
 	}
+del_key_exit:
 	__qseecom_disable_clk(CLK_QSEE);
 	return ret;
 }
@@ -3229,8 +3293,8 @@ static int __qseecom_set_clear_ce_key(struct qseecom_dev_handle *data,
 
 	if (usage < QSEOS_KM_USAGE_DISK_ENCRYPTION ||
 		usage >= QSEOS_KM_USAGE_MAX) {
-			pr_err("Error:: unsupported usage %d\n", usage);
-			return -EFAULT;
+		pr_err("Error:: unsupported usage %d\n", usage);
+		return -EFAULT;
 	}
 
 	__qseecom_enable_clk(CLK_QSEE);
@@ -3241,11 +3305,16 @@ static int __qseecom_set_clear_ce_key(struct qseecom_dev_handle *data,
 				ireq, sizeof(struct qseecom_key_select_ireq),
 				&resp, sizeof(struct qseecom_command_scm_resp));
 	if (ret) {
-		pr_err("scm call to set QSEOS_PIPE_ENC key failed : %d\n", ret);
-		__qseecom_disable_clk(CLK_QSEE);
-		if (qseecom.qsee.instance != qseecom.ce_drv.instance)
-			__qseecom_disable_clk(CLK_CE_DRV);
-		return -EFAULT;
+		if (ret == -EINVAL &&
+			resp.result == QSEOS_RESULT_FAIL_MAX_ATTEMPT) {
+			pr_debug("Max attempts to input password reached.\n");
+			ret = -ERANGE;
+		} else {
+			pr_err("scm call to set QSEOS_PIPE_ENC key failed : %d\n",
+				ret);
+			ret = -EFAULT;
+		}
+		goto set_key_exit;
 	}
 
 	switch (resp.result) {
@@ -3272,11 +3341,10 @@ static int __qseecom_set_clear_ce_key(struct qseecom_dev_handle *data,
 		ret = -EINVAL;
 		break;
 	}
-
+set_key_exit:
 	__qseecom_disable_clk(CLK_QSEE);
 	if (qseecom.qsee.instance != qseecom.ce_drv.instance)
 		__qseecom_disable_clk(CLK_CE_DRV);
-
 	return ret;
 }
 
@@ -3328,7 +3396,8 @@ static int __qseecom_update_current_key_user_info(
 static int qseecom_create_key(struct qseecom_dev_handle *data,
 			void __user *argp)
 {
-	uint32_t ce_hw = 0;
+	int i;
+	uint32_t *ce_hw = NULL;
 	uint32_t pipe = 0;
 	int ret = 0;
 	uint32_t flags = 0;
@@ -3336,95 +3405,125 @@ static int qseecom_create_key(struct qseecom_dev_handle *data,
 	struct qseecom_key_generate_ireq generate_key_ireq;
 	struct qseecom_key_select_ireq set_key_ireq;
 
+	ce_hw = kzalloc(qseecom.ce_info.hlos_num_ce_hw_instances
+			* sizeof(*ce_hw), GFP_KERNEL);
+	if (!ce_hw) {
+		pr_err("Alloc for hlos_num_ce_hw_instances failed\n");
+		ret = -EFAULT;
+		return ret;
+	}
+
 	ret = copy_from_user(&create_key_req, argp, sizeof(create_key_req));
 	if (ret) {
 		pr_err("copy_from_user failed\n");
-		return ret;
+		goto free_buf;
 	}
 
 	if (create_key_req.usage < QSEOS_KM_USAGE_DISK_ENCRYPTION ||
 		create_key_req.usage >= QSEOS_KM_USAGE_MAX) {
 		pr_err("Error:: unsupported usage %d\n", create_key_req.usage);
-		return -EFAULT;
+		ret = -EFAULT;
+		goto free_buf;
 	}
 
 	ret = __qseecom_get_ce_pipe_info(create_key_req.usage, &pipe, &ce_hw);
 	if (ret) {
 		pr_err("Failed to retrieve pipe/ce_hw info: %d\n", ret);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto free_buf;
 	}
+
 
 	generate_key_ireq.flags = flags;
 	generate_key_ireq.qsee_command_id = QSEOS_GENERATE_KEY;
-	memset((void *)generate_key_ireq.key_id, 0, QSEECOM_KEY_ID_SIZE);
-	memset((void *)generate_key_ireq.hash32, 0, QSEECOM_HASH_SIZE);
+	memset((void *)generate_key_ireq.key_id,
+			0, QSEECOM_KEY_ID_SIZE);
+	memset((void *)generate_key_ireq.hash32,
+			0, QSEECOM_HASH_SIZE);
 	memcpy((void *)generate_key_ireq.key_id,
 			(void *)key_id_array[create_key_req.usage].desc,
 			QSEECOM_KEY_ID_SIZE);
 	memcpy((void *)generate_key_ireq.hash32,
-			(void *)create_key_req.hash32, QSEECOM_HASH_SIZE);
+			(void *)create_key_req.hash32,
+			QSEECOM_HASH_SIZE);
 
-	ret = __qseecom_generate_and_save_key(data, create_key_req.usage,
-					&generate_key_ireq);
+	ret = __qseecom_generate_and_save_key(data,
+			create_key_req.usage, &generate_key_ireq);
 	if (ret) {
 		pr_err("Failed to generate key on storage: %d\n", ret);
-		return ret;
+		goto free_buf;
 	}
+	for (i = 0; i < qseecom.ce_info.hlos_num_ce_hw_instances;
+			i++) {
+		set_key_ireq.qsee_command_id = QSEOS_SET_KEY;
+		set_key_ireq.ce = ce_hw[i];
+		set_key_ireq.pipe = pipe;
+		set_key_ireq.flags = flags;
 
-	set_key_ireq.qsee_command_id = QSEOS_SET_KEY;
-	set_key_ireq.ce = ce_hw;
-	set_key_ireq.pipe = pipe;
-	set_key_ireq.flags = flags;
-
-	/* set both PIPE_ENC and PIPE_ENC_XTS*/
-	set_key_ireq.pipe_type = QSEOS_PIPE_ENC|QSEOS_PIPE_ENC_XTS;
-	memset((void *)set_key_ireq.key_id, 0, QSEECOM_KEY_ID_SIZE);
-	memset((void *)set_key_ireq.hash32, 0, QSEECOM_HASH_SIZE);
-	memcpy((void *)set_key_ireq.key_id,
-		(void *)key_id_array[create_key_req.usage].desc,
-		QSEECOM_KEY_ID_SIZE);
-	memcpy((void *)set_key_ireq.hash32, (void *)create_key_req.hash32,
+		/* set both PIPE_ENC and PIPE_ENC_XTS*/
+		set_key_ireq.pipe_type = QSEOS_PIPE_ENC|QSEOS_PIPE_ENC_XTS;
+		memset((void *)set_key_ireq.key_id, 0, QSEECOM_KEY_ID_SIZE);
+		memset((void *)set_key_ireq.hash32, 0, QSEECOM_HASH_SIZE);
+		memcpy((void *)set_key_ireq.key_id,
+			(void *)key_id_array[create_key_req.usage].desc,
+			QSEECOM_KEY_ID_SIZE);
+		memcpy((void *)set_key_ireq.hash32,
+				(void *)create_key_req.hash32,
 				QSEECOM_HASH_SIZE);
 
-	ret = __qseecom_set_clear_ce_key(data, create_key_req.usage,
-								&set_key_ireq);
-	if (ret) {
-		pr_err("Failed to create key: pipe %d, ce %d: %d\n",
-			pipe, ce_hw, ret);
-		return ret;
+		ret = __qseecom_set_clear_ce_key(data,
+					create_key_req.usage,
+					&set_key_ireq);
+		if (ret) {
+			pr_err("Failed to create key: pipe %d, ce %d: %d\n",
+				pipe, ce_hw[i], ret);
+			goto free_buf;
+		}
 	}
 
+free_buf:
+	kzfree(ce_hw);
 	return ret;
 }
 
 static int qseecom_wipe_key(struct qseecom_dev_handle *data,
 				void __user *argp)
 {
-	uint32_t ce_hw = 0;
+	uint32_t *ce_hw = NULL;
 	uint32_t pipe = 0;
 	int ret = 0;
 	uint32_t flags = 0;
-	int i;
+	int i, j;
 	struct qseecom_wipe_key_req wipe_key_req;
 	struct qseecom_key_delete_ireq delete_key_ireq;
 	struct qseecom_key_select_ireq clear_key_ireq;
 
+	ce_hw = kzalloc(qseecom.ce_info.hlos_num_ce_hw_instances
+			* sizeof(*ce_hw), GFP_KERNEL);
+	if (!ce_hw) {
+		pr_err("Alloc for hlos_num_ce_hw_instances failed\n");
+		ret = -EFAULT;
+		return ret;
+	}
+
 	ret = copy_from_user(&wipe_key_req, argp, sizeof(wipe_key_req));
 	if (ret) {
 		pr_err("copy_from_user failed\n");
-		return ret;
+		goto free_buf;
 	}
 
 	if (wipe_key_req.usage < QSEOS_KM_USAGE_DISK_ENCRYPTION ||
 		wipe_key_req.usage >= QSEOS_KM_USAGE_MAX) {
 		pr_err("Error:: unsupported usage %d\n", wipe_key_req.usage);
-		return -EFAULT;
+		ret = -EFAULT;
+		goto free_buf;
 	}
 
 	ret = __qseecom_get_ce_pipe_info(wipe_key_req.usage, &pipe, &ce_hw);
 	if (ret) {
 		pr_err("Failed to retrieve pipe/ce_hw info: %d\n", ret);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto free_buf;
 	}
 
 	if (wipe_key_req.wipe_key_flag) {
@@ -3441,27 +3540,35 @@ static int qseecom_wipe_key(struct qseecom_dev_handle *data,
 		if (ret) {
 			pr_err("Failed to delete key from ssd storage: %d\n",
 				ret);
-			return -EFAULT;
+			ret = -EFAULT;
+			goto free_buf;
 		}
 	}
 
-	clear_key_ireq.qsee_command_id = QSEOS_SET_KEY;
-	clear_key_ireq.ce = ce_hw;
-	clear_key_ireq.pipe = pipe;
-	clear_key_ireq.flags = flags;
-	clear_key_ireq.pipe_type = QSEOS_PIPE_ENC|QSEOS_PIPE_ENC_XTS;
-	for (i = 0; i < QSEECOM_KEY_ID_SIZE; i++)
-		clear_key_ireq.key_id[i] = QSEECOM_INVALID_KEY_ID;
-	memset((void *)clear_key_ireq.hash32, 0, QSEECOM_HASH_SIZE);
+	for (j = 0;
+		j < qseecom.ce_info.hlos_num_ce_hw_instances;
+		j++) {
+		clear_key_ireq.qsee_command_id = QSEOS_SET_KEY;
+		clear_key_ireq.ce = ce_hw[j];
+		clear_key_ireq.pipe = pipe;
+		clear_key_ireq.flags = flags;
+		clear_key_ireq.pipe_type = QSEOS_PIPE_ENC|QSEOS_PIPE_ENC_XTS;
+		for (i = 0; i < QSEECOM_KEY_ID_SIZE; i++)
+			clear_key_ireq.key_id[i] = QSEECOM_INVALID_KEY_ID;
+		memset((void *)clear_key_ireq.hash32, 0, QSEECOM_HASH_SIZE);
 
-	ret = __qseecom_set_clear_ce_key(data, wipe_key_req.usage,
-							&clear_key_ireq);
-	if (ret) {
-		pr_err("Failed to wipe key: pipe %d, ce %d: %d\n",
-			pipe, ce_hw, ret);
-		return -EFAULT;
+		ret = __qseecom_set_clear_ce_key(data, wipe_key_req.usage,
+					&clear_key_ireq);
+		if (ret) {
+			pr_err("Failed to wipe key: pipe %d, ce %d: %d\n",
+				pipe, ce_hw[j], ret);
+			ret = -EFAULT;
+			goto free_buf;
+		}
 	}
 
+free_buf:
+	kzfree(ce_hw);
 	return ret;
 }
 
@@ -3626,7 +3733,6 @@ static long qseecom_ioctl(struct file *file, unsigned cmd,
 		break;
 	}
 	case QSEECOM_IOCTL_SEND_CMD_REQ: {
-		pr_debug("qseecom.current_mode %d\n", qseecom.current_mode);
 		if ((data->client.app_id == 0) ||
 			(data->type != QSEECOM_CLIENT_APP)) {
 			pr_err("send cmd req: invalid handle (%d) app_id(%d)\n",
@@ -3687,7 +3793,6 @@ static long qseecom_ioctl(struct file *file, unsigned cmd,
 		break;
 	}
 	case QSEECOM_IOCTL_SEND_MODFD_CMD_REQ: {
-		pr_debug("qseecom.current_mode %d\n", qseecom.current_mode);
 		if ((data->client.app_id == 0) ||
 			(data->type != QSEECOM_CLIENT_APP)) {
 			pr_err("send mdfd cmd: invalid handle (%d) appid(%d)\n",
@@ -4225,10 +4330,13 @@ static int __qseecom_init_clk(enum qseecom_ce_hw_instance ce)
 	qclk->ce_core_src_clk = clk_get(pdev, core_clk_src);
 	if (!IS_ERR(qclk->ce_core_src_clk)) {
 		/* Set the core src clk @100Mhz */
-		rc = clk_set_rate(qclk->ce_core_src_clk, QSEE_CE_CLK_100MHZ);
+		rc = clk_set_rate(qclk->ce_core_src_clk,
+						qseecom.ce_opp_freq_hz);
 		if (rc) {
 			clk_put(qclk->ce_core_src_clk);
-			pr_err("Unable to set the core src clk @100Mhz.\n");
+			qclk->ce_core_src_clk = NULL;
+			pr_err("Unable to set the core src clk @%uMhz.\n",
+					qseecom.ce_opp_freq_hz/CE_CLK_DIV);
 			return -EIO;
 		}
 	} else {
@@ -4268,6 +4376,7 @@ static int __qseecom_init_clk(enum qseecom_ce_hw_instance ce)
 		clk_put(qclk->ce_clk);
 		return -EIO;
 	}
+
 	return rc;
 }
 
@@ -4431,7 +4540,7 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 		if (qseecom.support_pfe) {
 			if (of_property_read_u32((&pdev->dev)->of_node,
 				"qcom,file-encrypt-pipe-pair",
-				&qseecom.ce_info.disk_encrypt_pipe)) {
+				&qseecom.ce_info.file_encrypt_pipe)) {
 				pr_err("Fail to get PFE pipe information.\n");
 				rc = -EINVAL;
 				goto exit_destroy_ion_client;
@@ -4444,19 +4553,47 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 			qseecom.ce_info.file_encrypt_pipe = 0xff;
 		}
 		if (qseecom.support_pfe || qseecom.support_fde) {
-			if (of_property_read_u32((&pdev->dev)->of_node,
+			if (of_property_read_bool((&pdev->dev)->of_node,
+				"qcom,support-multiple-ce-hw-instance")) {
+				if (of_property_read_u32((&pdev->dev)->of_node,
+				"qcom,hlos-num-ce-hw-instances",
+				&qseecom.ce_info.hlos_num_ce_hw_instances)) {
+					pr_err("Fail: get hlos number of ce hw instance\n");
+					rc = -EINVAL;
+					goto exit_destroy_ion_client;
+				}
+			} else {
+				qseecom.ce_info.hlos_num_ce_hw_instances = 1;
+			}
+			qseecom.ce_info.hlos_ce_hw_instance =
+				kzalloc(qseecom.ce_info.hlos_num_ce_hw_instances
+				* sizeof(*qseecom.ce_info.hlos_ce_hw_instance),
+				GFP_KERNEL);
+			if (qseecom.ce_info.hlos_ce_hw_instance == NULL) {
+				pr_err("Fail: null kzalloc\n");
+				rc = -EINVAL;
+				goto exit_destroy_hw_instance_list;
+			}
+			if (of_property_read_u32_array((&pdev->dev)->of_node,
 				"qcom,hlos-ce-hw-instance",
-				&qseecom.ce_info.hlos_ce_hw_instance)) {
+				(u32 *)qseecom.ce_info.hlos_ce_hw_instance,
+				qseecom.ce_info.hlos_num_ce_hw_instances)) {
 				pr_err("Fail: get hlos ce hw instanc info\n");
 				rc = -EINVAL;
-				goto exit_destroy_ion_client;
-			} else {
-				pr_warn("hlos-ce-hw-instance=0x%x",
-				qseecom.ce_info.hlos_ce_hw_instance);
+				goto exit_destroy_hw_instance_list;
 			}
 		} else {
 			pr_warn("Device does not support PFE/FDE");
-			qseecom.ce_info.hlos_ce_hw_instance = 0xff;
+			qseecom.ce_info.hlos_ce_hw_instance =
+				kzalloc(
+				sizeof(*qseecom.ce_info.hlos_ce_hw_instance),
+				GFP_KERNEL);
+			if (qseecom.ce_info.hlos_ce_hw_instance == NULL) {
+				pr_err("Fail: null kzalloc\n");
+				rc = -EINVAL;
+				goto exit_destroy_hw_instance_list;
+			}
+			qseecom.ce_info.hlos_ce_hw_instance[0] = 0xff;
 		}
 
 		if (of_property_read_u32((&pdev->dev)->of_node,
@@ -4464,7 +4601,7 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 				&qseecom.ce_info.qsee_ce_hw_instance)) {
 			pr_err("Fail to get qsee ce hw instance information.\n");
 			rc = -EINVAL;
-			goto exit_destroy_ion_client;
+			goto exit_destroy_hw_instance_list;
 		} else {
 			pr_warn("qsee-ce-hw-instance=0x%x",
 			qseecom.ce_info.qsee_ce_hw_instance);
@@ -4477,18 +4614,25 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 				qseecom.appsbl_qseecom_support);
 
 		qseecom.qsee.instance = qseecom.ce_info.qsee_ce_hw_instance;
-		qseecom.ce_drv.instance = qseecom.ce_info.hlos_ce_hw_instance;
+		qseecom.ce_drv.instance =
+			qseecom.ce_info.hlos_ce_hw_instance[0];
 
+		if (of_property_read_u32((&pdev->dev)->of_node,
+				"qcom,ce-opp-freq",
+				&qseecom.ce_opp_freq_hz)) {
+			pr_info("CE operating frequency is not defined, setting to default 100MHZ\n");
+			qseecom.ce_opp_freq_hz = QSEE_CE_CLK_100MHZ;
+		}
 		ret = __qseecom_init_clk(CLK_QSEE);
 		if (ret)
-			goto exit_destroy_ion_client;
+			goto exit_destroy_hw_instance_list;
 
 		if ((qseecom.qsee.instance != qseecom.ce_drv.instance) &&
 				(qseecom.support_pfe || qseecom.support_fde)) {
 			ret = __qseecom_init_clk(CLK_CE_DRV);
 			if (ret) {
 				__qseecom_deinit_clk(CLK_QSEE);
-				goto exit_destroy_ion_client;
+				goto exit_destroy_hw_instance_list;
 			}
 		} else {
 			struct qseecom_clk *qclk;
@@ -4519,7 +4663,7 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 			} else {
 				pr_err("Fail to get secure app region info\n");
 				rc = -EINVAL;
-				goto exit_destroy_ion_client;
+				goto exit_destroy_hw_instance_list;
 			}
 			rc = scm_call(SCM_SVC_TZSCHEDULER, 1, &req, sizeof(req),
 							&resp, sizeof(resp));
@@ -4527,7 +4671,7 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 				pr_err("send secapp reg fail %d resp.res %d\n",
 							rc, resp.result);
 				rc = -EINVAL;
-				goto exit_destroy_ion_client;
+				goto exit_destroy_hw_instance_list;
 			}
 		}
 	} else {
@@ -4549,6 +4693,8 @@ static int __devinit qseecom_probe(struct platform_device *pdev)
 		pr_err("Unable to register bus client\n");
 	return 0;
 
+exit_destroy_hw_instance_list:
+	kzfree(qseecom.ce_info.hlos_ce_hw_instance);
 exit_destroy_ion_client:
 	ion_client_destroy(qseecom.ion_clnt);
 exit_del_cdev:
@@ -4665,6 +4811,7 @@ static int qseecom_suspend(struct platform_device *pdev, pm_message_t state)
 
 	mutex_unlock(&clk_access_lock);
 	mutex_unlock(&qsee_bw_mutex);
+	cancel_work_sync(&qseecom.bw_inactive_req_ws);
 
 	return 0;
 }
@@ -4693,26 +4840,31 @@ static int qseecom_resume(struct platform_device *pdev)
 	}
 
 	if (qclk->clk_access_cnt) {
-
-		ret = clk_prepare_enable(qclk->ce_core_clk);
-		if (ret) {
-			pr_err("Unable to enable/prepare CE core clk\n");
-			qclk->clk_access_cnt = 0;
-			goto err;
+		if (qclk->ce_core_clk != NULL) {
+			ret = clk_prepare_enable(qclk->ce_core_clk);
+			if (ret) {
+				pr_err("Unable to enable/prep CE core clk\n");
+				qclk->clk_access_cnt = 0;
+				goto err;
+			}
 		}
 
-		ret = clk_prepare_enable(qclk->ce_clk);
-		if (ret) {
-			pr_err("Unable to enable/prepare CE iface clk\n");
-			qclk->clk_access_cnt = 0;
-			goto ce_clk_err;
+		if (qclk->ce_clk != NULL) {
+			ret = clk_prepare_enable(qclk->ce_clk);
+			if (ret) {
+				pr_err("Unable to enable/prep CE iface clk\n");
+				qclk->clk_access_cnt = 0;
+				goto ce_clk_err;
+			}
 		}
 
-		ret = clk_prepare_enable(qclk->ce_bus_clk);
-		if (ret) {
-			pr_err("Unable to enable/prepare CE bus clk\n");
-			qclk->clk_access_cnt = 0;
-			goto ce_bus_clk_err;
+		if (qclk->ce_bus_clk != NULL) {
+			ret = clk_prepare_enable(qclk->ce_bus_clk);
+			if (ret) {
+				pr_err("Unable to enable/prep CE bus clk\n");
+				qclk->clk_access_cnt = 0;
+				goto ce_bus_clk_err;
+			}
 		}
 	}
 
