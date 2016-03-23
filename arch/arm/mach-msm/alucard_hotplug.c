@@ -385,7 +385,7 @@ static int hotplug_start(void)
 	*/
 	delay = delay - (jiffies % delay) + 1;
 
-	INIT_DELAYED_WORK_DEFERRABLE(&alucard_hotplug_work, hotplug_work_fn);
+	INIT_DEFERRABLE_WORK(&alucard_hotplug_work, hotplug_work_fn);
 	queue_delayed_work_on(BOOT_CPU, alucard_hp_wq,
 				&alucard_hotplug_work,
 				delay);
