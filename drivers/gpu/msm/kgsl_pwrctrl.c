@@ -408,13 +408,7 @@ static int kgsl_pwrctrl_max_gpuclk_store(struct device *dev,
 	if (level < 0)
 		goto done;
 
-	if (level > 6)
-		level = 6;
-
-	if (level == 2)
-		pwr->thermal_pwrlevel = (unsigned int) level - 2;
-	else
-		pwr->thermal_pwrlevel = (unsigned int) level;
+	pwr->thermal_pwrlevel = (unsigned int) level;
 
 	/*
 	 * if the thermal limit is lower than the current setting,
