@@ -1,4 +1,5 @@
-/* Copyright (c) 2010-2014, The Linux Foundation. All rights reserved.
+/* 
+ * Copyright (c) 2010-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -69,22 +70,26 @@ static bool power_suspended = false;
 static int __secure_tz_entry2(u32 cmd, u32 val1, u32 val2)
 {
 	int ret;
+
 	spin_lock(&tz_lock);
 	/* sync memory before sending the commands to tz*/
 	__iowmb();
 	ret = scm_call_atomic2(SCM_SVC_IO, cmd, val1, val2);
 	spin_unlock(&tz_lock);
+
 	return ret;
 }
 
 static int __secure_tz_entry3(u32 cmd, u32 val1, u32 val2, u32 val3)
 {
 	int ret;
+
 	spin_lock(&tz_lock);
 	/* sync memory before sending the commands to tz*/
 	__iowmb();
 	ret = scm_call_atomic3(SCM_SVC_IO, cmd, val1, val2, val3);
 	spin_unlock(&tz_lock);
+
 	return ret;
 }
 
@@ -108,7 +113,7 @@ extern int simple_gpu_algorithm(int level,
 
 #ifdef CONFIG_ADRENO_IDLER
 extern int adreno_idler(struct devfreq_dev_status stats, struct devfreq *devfreq,
-		 unsigned long *freq);
+	 	 unsigned long *freq);
 #endif
 
 static int tz_get_target_freq(struct devfreq *devfreq, unsigned long *freq,

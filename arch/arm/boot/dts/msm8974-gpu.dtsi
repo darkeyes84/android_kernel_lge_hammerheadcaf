@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,7 +23,7 @@
 		qcom,chipid = <0x03030000>;
 
 		qcom,bus-control;
-		qcom,initial-pwrlevel = <5>;
+		qcom,initial-pwrlevel = <4>;
 		qcom,idle-timeout = <8>; //<HZ/12>
 		qcom,strtstp-sleepwake;
 		qcom,clk-map = <0x0000006>; //KGSL_CLK_CORE | KGSL_CLK_IFACE
@@ -78,48 +78,36 @@
 
 			qcom,gpu-pwrlevel@0 {
 				reg = <0>;
-				qcom,gpu-freq = <650000000>;
+				qcom,gpu-freq = <578000000>;
 				qcom,bus-freq = <16>;
 			};
 
 			qcom,gpu-pwrlevel@1 {
 				reg = <1>;
-				qcom,gpu-freq = <533333000>;
-				qcom,bus-freq = <13>;
+				qcom,gpu-freq = <462400000>;
+				qcom,bus-freq = <12>;
 			};
 
 			qcom,gpu-pwrlevel@2 {
 				reg = <2>;
-				qcom,gpu-freq = <450000000>;
-				qcom,bus-freq = <10>;
+				qcom,gpu-freq = <389000000>;
+				qcom,bus-freq = <8>;
 			};
 
 			qcom,gpu-pwrlevel@3 {
 				reg = <3>;
-				qcom,gpu-freq = <389000000>;
-				qcom,bus-freq = <7>;
+				qcom,gpu-freq = <330000000>;
+				qcom,bus-freq = <6>;
 			};
 
 			qcom,gpu-pwrlevel@4 {
 				reg = <4>;
-				qcom,gpu-freq = <320000000>;
-				qcom,bus-freq = <4>;
+				qcom,gpu-freq = <200000000>;
+				qcom,bus-freq = <1>;
 			};
 
 			qcom,gpu-pwrlevel@5 {
 				reg = <5>;
-				qcom,gpu-freq = <200000000>;
-				qcom,bus-freq = <2>;
-			};
-
-			qcom,gpu-pwrlevel@6 {
-				reg = <6>;
-				qcom,gpu-freq = <100000000>;
-				qcom,bus-freq = <1>;
-			};
-
-			qcom,gpu-pwrlevel@7 {
-				reg = <7>;
 				qcom,gpu-freq = <27000000>;
 				qcom,bus-freq = <0>;
 			};
@@ -201,4 +189,3 @@
 
 	};
 };
-
