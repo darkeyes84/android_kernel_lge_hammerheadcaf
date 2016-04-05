@@ -55,7 +55,7 @@ CLEAN()
 	rm -rf $KERNELDIR/arch/arm/crypto/aesbs-core.S;
 	rm -rf $KERNELDIR/include/generated;
 	rm -rf $KERNELDIR/arch/*/include/generated;
-	rm -rf $KERNELDIR/android/ready-kernel/core/zImage-dtb;
+	rm -rf $KERNELDIR/android/ready-kernel/kernel/zImage-dtb;
 
 	echo "${bldgrn}***** Cleaned!${txtrst}";
 	DELAY;
