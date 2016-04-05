@@ -20,7 +20,7 @@
 #include <linux/io.h>
 #include <linux/ftrace.h>
 #include <linux/msm_adreno_devfreq.h>
-#ifdef CONFIG_TOUCHSCREEN_STATE_NOTIFIER
+#ifdef CONFIG_STATE_NOTIFIER
 #include <linux/state_notifier.h>
 static struct notifier_block adreno_tz_state_notif;
 #endif
@@ -436,7 +436,7 @@ static struct devfreq_governor msm_adreno_tz = {
 	.event_handler = tz_handler,
 };
 
-#ifdef CONFIG_TOUCHSCREEN_STATE_NOTIFIER
+#ifdef CONFIG_STATE_NOTIFIER
 static int state_notifier_callback(struct notifier_block *this,
 				unsigned long event, void *data)
 {
@@ -457,7 +457,7 @@ static int state_notifier_callback(struct notifier_block *this,
 
 static int __init msm_adreno_tz_init(void)
 {
-#ifdef CONFIG_TOUCHSCREEN_STATE_NOTIFIER
+#ifdef CONFIG_STATE_NOTIFIER
 	adreno_tz_state_notif.notifier_call = state_notifier_callback;
 	if (state_register_client(&adreno_tz_state_notif))
 		pr_err("%s: Failed to register State notifier callback\n",
@@ -471,7 +471,7 @@ static void __exit msm_adreno_tz_exit(void)
 {
 	int ret;
 
-#ifdef CONFIG_TOUCHSCREEN_STATE_NOTIFIER
+#ifdef CONFIG_STATE_NOTIFIER
 	state_unregister_client(&adreno_tz_state_notif);
 	adreno_tz_state_notif.notifier_call = NULL;
 #endif
