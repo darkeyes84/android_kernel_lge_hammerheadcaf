@@ -211,7 +211,7 @@ on property:sys.boot_completed=1
 	
 	write /sys/module/simple_gpu_algorithm/parameters/simple_gpu_activate 1
 	
-	write /sys/devices/fdb00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/max_gpuclk 450000000
+	write /sys/devices/fdb00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/max_gpuclk 462400000
 	
 	write /sys/module/alu_t_boost/parameters/input_boost_freq 1497600
 	write /sys/module/alu_t_boost/parameters/input_boost_ms 500
