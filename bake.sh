@@ -101,7 +101,7 @@ BUILD()
 	make -j$NRCPUS zImage-dtb;
 
 	if [ -e $KERNELDIR/arch/arm/boot/zImage-dtb ]; then
-		mv arch/arm/boot/zImage-dtb $KERNELDIR/android/ready-kernel/core/
+		mv arch/arm/boot/zImage-dtb $KERNELDIR/android/ready-kernel/kernel/
 
 		cd android/ready-kernel/
 

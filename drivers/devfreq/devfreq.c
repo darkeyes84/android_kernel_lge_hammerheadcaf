@@ -350,6 +350,7 @@ void devfreq_interval_update(struct devfreq *devfreq, unsigned int *delay)
 	unsigned int new_delay = *delay;
 
 	mutex_lock(&devfreq->lock);
+	devfreq->profile->polling_ms = new_delay;
 
 	if (devfreq->stop_polling)
 		goto out;
@@ -722,9 +723,9 @@ int devfreq_policy_add_files(struct devfreq *devfreq,
 {
 	int ret;
 
-	ret = sysfs_create_group(&devfreq->dev.kobj, &attr_group);
+	ret = sysfs_create_group(gpufreq_kobj, &attr_group);
 	if (ret)
-		kobject_put(&devfreq->dev.kobj);
+		kobject_put(gpufreq_kobj);
 
 	return ret;
 }
@@ -733,7 +734,7 @@ EXPORT_SYMBOL(devfreq_policy_add_files);
 void devfreq_policy_remove_files(struct devfreq *devfreq,
 				 struct attribute_group attr_group)
 {
-	sysfs_remove_group(&devfreq->dev.kobj, &attr_group);
+	sysfs_remove_group(gpufreq_kobj, &attr_group);
 }
 EXPORT_SYMBOL(devfreq_policy_remove_files);
 
@@ -815,15 +816,9 @@ static ssize_t show_freq(struct device *dev,
 {
 	unsigned long freq;
 	struct devfreq *devfreq = to_devfreq(dev);
-	struct devfreq_dev_profile *profile = devfreq->profile;
 
-	if (devfreq->state == KGSL_STATE_SLUMBER) {
-		freq = 27000000;
-		return sprintf(buf, "%lu\n", freq);
-	}
-
-	if (profile->get_cur_freq &&
-		!profile->get_cur_freq(devfreq->dev.parent, &freq))
+	if (devfreq->profile->get_cur_freq &&
+		!devfreq->profile->get_cur_freq(devfreq->dev.parent, &freq))
 			return sprintf(buf, "%lu\n", freq);
 
 	return sprintf(buf, "%lu\n", devfreq->previous_freq);
@@ -856,7 +851,6 @@ static ssize_t store_polling_interval(struct device *dev,
 	if (ret != 1)
 		return -EINVAL;
 
-	df->profile->polling_ms = value;
 	df->governor->event_handler(df, DEVFREQ_GOV_INTERVAL, &value);
 	ret = count;
 
@@ -1057,10 +1051,7 @@ static int __init devfreq_init(void)
 		return PTR_ERR(devfreq_class);
 	}
 
-	devfreq_wq =
-	    alloc_workqueue("devfreq_wq",
-			    WQ_HIGHPRI | WQ_UNBOUND | WQ_FREEZABLE |
-			    WQ_MEM_RECLAIM, 0);
+	devfreq_wq = create_freezable_workqueue("devfreq_wq");
 	if (IS_ERR(devfreq_wq)) {
 		class_destroy(devfreq_class);
 		pr_err("%s: couldn't create workqueue\n", __FILE__);
