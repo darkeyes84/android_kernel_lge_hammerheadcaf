@@ -159,8 +159,8 @@ void kgsl_pwrctrl_request_state(struct kgsl_device *device, unsigned int state);
 
 int __must_check kgsl_active_count_get(struct kgsl_device *device);
 int __must_check kgsl_active_count_get_light(struct kgsl_device *device);
-int kgsl_active_count_wait(struct kgsl_device *device, int count);
 void kgsl_active_count_put(struct kgsl_device *device);
+int kgsl_active_count_wait(struct kgsl_device *device, int count);
 void kgsl_pwrctrl_busy_time(struct kgsl_device *device, u64 time, u64 busy);
 void kgsl_pwrctrl_update_l2pc(struct kgsl_device *device);
 

@@ -12,7 +12,7 @@ config MSM_KGSL
 	select ADRENO_IDLER
 	---help---
 	  3D graphics driver. Required to use hardware accelerated
-	  OpenGL ES 3.0 and 2.0.
+	  OpenGL ES 2.0 and 1.1.
 
 config MSM_KGSL_CFF_DUMP
 	bool "Enable KGSL Common File Format (CFF) Dump Feature [Use with caution]"

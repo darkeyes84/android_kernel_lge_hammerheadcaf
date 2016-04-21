@@ -422,7 +422,6 @@ kgsl_mem_entry_attach_process(struct kgsl_mem_entry *entry,
 	ret = kgsl_process_private_get(process);
 	if (!ret)
 		return -EBADF;
-
 	idr_preload(GFP_KERNEL);
 	spin_lock(&process->mem_lock);
 	id = idr_alloc(&process->mem_idr, entry, 1, 0, GFP_NOWAIT);
@@ -534,7 +533,6 @@ int kgsl_context_init(struct kgsl_device_private *dev_priv,
 	context->id = id;
 	write_unlock(&device->context_lock);
 	idr_preload_end();
-
 	if (id < 0) {
 		ret = id;
 		goto fail;

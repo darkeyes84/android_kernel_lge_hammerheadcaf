@@ -173,6 +173,10 @@ struct msm_compr_dec_params {
 	struct snd_dec_ddp ddp_params;
 };
 
+static int msm_compr_send_dec_params(struct snd_compr_stream *cstream,
+				     struct msm_compr_dec_params *dec_params,
+				     int stream_id);
+
 static int msm_compr_set_volume(struct snd_compr_stream *cstream,
 				uint32_t volume_l, uint32_t volume_r)
 {
@@ -221,13 +225,15 @@ static int msm_compr_set_volume(struct snd_compr_stream *cstream,
 }
 
 static int msm_compr_send_ddp_cfg(struct audio_client *ac,
-				  struct snd_dec_ddp *ddp)
+				  struct snd_dec_ddp *ddp,
+				  int stream_id)
 {
 	int i, rc;
 	pr_debug("%s\n", __func__);
 	for (i = 0; i < ddp->params_length; i++) {
-		rc = q6asm_ds1_set_endp_params(ac, ddp->params_id[i],
-						ddp->params_value[i]);
+		rc = q6asm_ds1_set_stream_endp_params(ac, ddp->params_id[i],
+						      ddp->params_value[i],
+						      stream_id);
 		if (rc) {
 			pr_err("sending params_id: %d failed\n",
 				ddp->params_id[i]);
@@ -551,7 +557,7 @@ static void populate_codec_list(struct msm_compr_audio *prtd)
 			COMPR_PLAYBACK_MIN_NUM_FRAGMENTS;
 	prtd->compr_cap.max_fragments =
 			COMPR_PLAYBACK_MAX_NUM_FRAGMENTS;
-	prtd->compr_cap.num_codecs = 9;
+	prtd->compr_cap.num_codecs = 12;
 	prtd->compr_cap.codecs[0] = SND_AUDIOCODEC_MP3;
 	prtd->compr_cap.codecs[1] = SND_AUDIOCODEC_AAC;
 	prtd->compr_cap.codecs[2] = SND_AUDIOCODEC_AC3;
@@ -561,6 +567,9 @@ static void populate_codec_list(struct msm_compr_audio *prtd)
 	prtd->compr_cap.codecs[6] = SND_AUDIOCODEC_WMA;
 	prtd->compr_cap.codecs[7] = SND_AUDIOCODEC_WMA_PRO;
 	prtd->compr_cap.codecs[8] = SND_AUDIOCODEC_FLAC;
+	prtd->compr_cap.codecs[9] = SND_AUDIOCODEC_VORBIS;
+	prtd->compr_cap.codecs[10] = SND_AUDIOCODEC_ALAC;
+	prtd->compr_cap.codecs[11] = SND_AUDIOCODEC_APE;
 }
 
 static int msm_compr_send_media_format_block(struct snd_compr_stream *cstream,
@@ -573,8 +582,12 @@ static int msm_compr_send_media_format_block(struct snd_compr_stream *cstream,
 	struct asm_wma_cfg wma_cfg;
 	struct asm_wmapro_cfg wma_pro_cfg;
 	struct asm_flac_cfg flac_cfg;
+	struct asm_vorbis_cfg vorbis_cfg;
+	struct asm_alac_cfg alac_cfg;
+	struct asm_ape_cfg ape_cfg;
 	union snd_codec_options *codec_options;
 
+	u32 cfg;
 	int ret = 0;
 	uint16_t bit_width = 16;
 
@@ -691,6 +704,78 @@ static int msm_compr_send_media_format_block(struct snd_compr_stream *cstream,
 				__func__, ret);
 
 		break;
+	case FORMAT_VORBIS:
+		pr_debug("%s: SND_AUDIOCODEC_VORBIS\n", __func__);
+		memset(&vorbis_cfg, 0x0, sizeof(struct asm_vorbis_cfg));
+		cfg = prtd->codec_param.codec.options.vorbis_dec.bit_stream_fmt;
+		vorbis_cfg.bit_stream_fmt = cfg;
+
+		ret = q6asm_stream_media_format_block_vorbis(
+					prtd->audio_client, &vorbis_cfg,
+					stream_id);
+		if (ret < 0)
+			pr_err("%s: CMD Format block failed ret %d\n",
+					__func__, ret);
+
+		break;
+	case FORMAT_ALAC:
+		pr_debug("%s: SND_AUDIOCODEC_ALAC\n", __func__);
+		memset(&alac_cfg, 0x0, sizeof(struct asm_alac_cfg));
+		alac_cfg.num_channels = prtd->num_channels;
+		alac_cfg.sample_rate = prtd->sample_rate;
+		alac_cfg.frame_length =
+			prtd->codec_param.codec.options.alac.frame_length;
+		alac_cfg.compatible_version =
+			prtd->codec_param.codec.options.alac.compatible_version;
+		alac_cfg.bit_depth =
+			prtd->codec_param.codec.options.alac.bit_depth;
+		alac_cfg.pb = prtd->codec_param.codec.options.alac.pb;
+		alac_cfg.mb = prtd->codec_param.codec.options.alac.mb;
+		alac_cfg.kb = prtd->codec_param.codec.options.alac.kb;
+		alac_cfg.max_run = prtd->codec_param.codec.options.alac.max_run;
+		alac_cfg.max_frame_bytes =
+			prtd->codec_param.codec.options.alac.max_frame_bytes;
+		alac_cfg.avg_bit_rate =
+			prtd->codec_param.codec.options.alac.avg_bit_rate;
+		alac_cfg.channel_layout_tag =
+			prtd->codec_param.codec.options.alac.channel_layout_tag;
+
+		ret = q6asm_media_format_block_alac(prtd->audio_client,
+							&alac_cfg, stream_id);
+		if (ret < 0)
+			pr_err("%s: CMD Format block failed ret %d\n",
+					__func__, ret);
+		break;
+	case FORMAT_APE:
+		pr_debug("%s: SND_AUDIOCODEC_APE\n", __func__);
+		memset(&ape_cfg, 0x0, sizeof(struct asm_ape_cfg));
+		ape_cfg.num_channels = prtd->num_channels;
+		ape_cfg.sample_rate = prtd->sample_rate;
+		ape_cfg.compatible_version =
+			prtd->codec_param.codec.options.ape.compatible_version;
+		ape_cfg.compression_level =
+			prtd->codec_param.codec.options.ape.compression_level;
+		ape_cfg.format_flags =
+			prtd->codec_param.codec.options.ape.format_flags;
+		ape_cfg.blocks_per_frame =
+			prtd->codec_param.codec.options.ape.blocks_per_frame;
+		ape_cfg.final_frame_blocks =
+			prtd->codec_param.codec.options.ape.final_frame_blocks;
+		ape_cfg.total_frames =
+			prtd->codec_param.codec.options.ape.total_frames;
+		ape_cfg.bits_per_sample =
+			prtd->codec_param.codec.options.ape.bits_per_sample;
+		ape_cfg.seek_table_present =
+			prtd->codec_param.codec.options.ape.seek_table_present;
+
+		ret = q6asm_media_format_block_ape(prtd->audio_client,
+							&ape_cfg, stream_id);
+
+		if (ret < 0)
+			pr_err("%s: CMD Format block failed ret %d\n",
+					__func__, ret);
+		break;
+
 	default:
 		pr_debug("%s, unsupported format, skip", __func__);
 		break;
@@ -1092,6 +1177,24 @@ static int msm_compr_set_params(struct snd_compr_stream *cstream,
 		break;
 	}
 
+	case SND_AUDIOCODEC_VORBIS: {
+		pr_debug("%s: SND_AUDIOCODEC_VORBIS\n", __func__);
+		prtd->codec = FORMAT_VORBIS;
+		break;
+	}
+
+	case SND_AUDIOCODEC_ALAC: {
+		pr_debug("%s: SND_AUDIOCODEC_ALAC\n", __func__);
+		prtd->codec = FORMAT_ALAC;
+		break;
+	}
+
+	case SND_AUDIOCODEC_APE: {
+		pr_debug("%s: SND_AUDIOCODEC_APE\n", __func__);
+		prtd->codec = FORMAT_APE;
+		break;
+	}
+
 	default:
 		pr_err("codec not supported, id =%d\n", params->codec.id);
 		return -EINVAL;
@@ -1196,6 +1299,7 @@ static int msm_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 			snd_soc_platform_get_drvdata(rtd->platform);
 	uint32_t *volume = pdata->volume[rtd->dai_link->be_id];
 	struct audio_client *ac = prtd->audio_client;
+	unsigned long fe_id = rtd->dai_link->be_id;
 	int rc = 0;
 	int bytes_to_write;
 	unsigned long flags;
@@ -1582,7 +1686,8 @@ static int msm_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 				 __func__);
 			break;
 		}
-
+		msm_compr_send_dec_params(cstream, pdata->dec_params[fe_id],
+					  stream_id);
 		spin_lock_irqsave(&prtd->lock, flags);
 		prtd->gapless_state.stream_opened[stream_index] = 1;
 		prtd->gapless_state.set_next_stream_id = true;
@@ -1834,6 +1939,12 @@ static int msm_compr_get_codec_caps(struct snd_compr_stream *cstream,
 		break;
 	case SND_AUDIOCODEC_FLAC:
 		break;
+	case SND_AUDIOCODEC_VORBIS:
+		break;
+	case SND_AUDIOCODEC_ALAC:
+		break;
+	case SND_AUDIOCODEC_APE:
+		break;
 	default:
 		pr_err("%s: Unsupported audio codec %d\n",
 			__func__, codec->codec);
@@ -2036,6 +2147,50 @@ static int msm_compr_audio_effects_config_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int msm_compr_send_dec_params(struct snd_compr_stream *cstream,
+				     struct msm_compr_dec_params *dec_params,
+				     int stream_id)
+{
+
+	int rc = 0;
+	struct msm_compr_audio *prtd = NULL;
+	struct snd_dec_ddp *ddp = &dec_params->ddp_params;
+
+	if (!cstream || !dec_params) {
+		pr_err("%s: stream or dec_params inactive\n", __func__);
+		rc = -EINVAL;
+		goto end;
+	}
+	prtd = cstream->runtime->private_data;
+	if (!prtd) {
+		pr_err("%s: cannot set dec_params\n", __func__);
+		rc = -EINVAL;
+		goto end;
+	}
+	switch (prtd->codec) {
+	case FORMAT_MP3:
+	case FORMAT_MPEG4_AAC:
+	case FORMAT_FLAC:
+	case FORMAT_VORBIS:
+	case FORMAT_ALAC:
+	case FORMAT_APE:
+		pr_debug("%s: no runtime parameters for codec: %d\n", __func__,
+			 prtd->codec);
+		break;
+	case FORMAT_AC3:
+	case FORMAT_EAC3:
+		rc = msm_compr_send_ddp_cfg(prtd->audio_client, ddp, stream_id);
+		if (rc < 0)
+			pr_err("%s: DDP CMD CFG failed\n", __func__);
+		break;
+	default:
+		break;
+	}
+end:
+	return rc;
+
+}
+
 static int msm_compr_dec_params_put(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_value *ucontrol)
 {
@@ -2047,12 +2202,14 @@ static int msm_compr_dec_params_put(struct snd_kcontrol *kcontrol,
 	struct snd_compr_stream *cstream = NULL;
 	struct msm_compr_audio *prtd = NULL;
 	long *values = &(ucontrol->value.integer.value[0]);
+	int rc = 0;
 
 	pr_debug("%s\n", __func__);
 	if (fe_id >= MSM_FRONTEND_DAI_MAX) {
 		pr_err("%s Received out of bounds fe_id %lu\n",
 			__func__, fe_id);
-		return -EINVAL;
+		rc = -EINVAL;
+		goto end;
 	}
 
 	cstream = pdata->cstream[fe_id];
@@ -2060,13 +2217,16 @@ static int msm_compr_dec_params_put(struct snd_kcontrol *kcontrol,
 
 	if (!cstream || !dec_params) {
 		pr_err("%s: stream or dec_params inactive\n", __func__);
-		return -EINVAL;
+		rc = -EINVAL;
+		goto end;
 	}
 	prtd = cstream->runtime->private_data;
 	if (!prtd) {
 		pr_err("%s: cannot set dec_params\n", __func__);
-		return -EINVAL;
+		rc = -EINVAL;
+		goto end;
 	}
+
 	switch (prtd->codec) {
 	case FORMAT_MP3:
 	case FORMAT_MPEG4_AAC:
@@ -2082,20 +2242,25 @@ static int msm_compr_dec_params_put(struct snd_kcontrol *kcontrol,
 		if (ddp->params_length > DDP_DEC_MAX_NUM_PARAM) {
 			pr_err("%s: invalid num of params:: %d\n", __func__,
 				ddp->params_length);
-			return -EINVAL;
+			rc = -EINVAL;
+			goto end;
 		}
 		for (cnt = 0; cnt < ddp->params_length; cnt++) {
 			ddp->params_id[cnt] = *values++;
 			ddp->params_value[cnt] = *values++;
 		}
-		if (msm_compr_send_ddp_cfg(prtd->audio_client, ddp) < 0)
-			pr_err("%s: DDP CMD CFG failed\n", __func__);
+		prtd = cstream->runtime->private_data;
+		if (prtd && prtd->audio_client)
+			rc = msm_compr_send_dec_params(cstream, dec_params,
+						prtd->audio_client->stream_id);
 		break;
 	}
 	default:
 		break;
 	}
-	return 0;
+end:
+	pr_debug("%s: ret %d\n", __func__, rc);
+	return rc;
 }
 
 static int msm_compr_dec_params_get(struct snd_kcontrol *kcontrol,

@@ -19,6 +19,9 @@
 
 #define DEVFREQ_NAME_LEN 16
 
+/* As defined in the kgsl device header */
+#define KGSL_STATE_SLUMBER 0x00000080
+
 struct devfreq;
 
 /**
@@ -57,6 +60,20 @@ struct devfreq_dev_status {
 #define DEVFREQ_FLAG_WAKEUP_MAXFREQ		0x8
 
 /**
+ * struct devfreq_governor_data - mapping to per device governor data
+ * @name:		The name of the governor.
+ * @data:		Private data for the governor.
+ *
+ * Devices may pass in an array of this structure to allow governors
+ * to get the correct data pointer when they are enabled after
+ * the devfreq_add_device() call.
+ */
+struct devfreq_governor_data {
+	const char *name;
+	void *data;
+};
+
+/**
  * struct devfreq_dev_profile - Devfreq's user device profile
  * @initial_freq:	The operating frequency when devfreq_add_device() is
  *			called.
@@ -79,6 +96,11 @@ struct devfreq_dev_status {
  *			this is the time to unregister it.
  * @freq_table:	Optional list of frequencies to support statistics.
  * @max_state:	The size of freq_table.
+ * @governor_data:	Optional array of private data for governors.
+ *			This is used to set devfreq->data correctly
+ *			when a governor is enabled via sysfs or other
+ *			mechanisms after the devfreq_add_device() call.
+ * @num_governor_data:  Number of elements in governor_data.
  */
 struct devfreq_dev_profile {
 	unsigned long initial_freq;
@@ -92,6 +114,8 @@ struct devfreq_dev_profile {
 
 	unsigned int *freq_table;
 	unsigned int max_state;
+	const struct devfreq_governor_data *governor_data;
+	unsigned int num_governor_data;
 };
 
 /**
@@ -164,6 +188,7 @@ struct devfreq {
 	char governor_name[DEVFREQ_NAME_LEN];
 	struct notifier_block nb;
 	struct delayed_work work;
+	uint32_t state;
 
 	unsigned long previous_freq;
 
@@ -266,3 +291,4 @@ static int devfreq_unregister_opp_notifier(struct device *dev,
 #endif /* CONFIG_PM_DEVFREQ */
 
 #endif /* __LINUX_DEVFREQ_H__ */
+
