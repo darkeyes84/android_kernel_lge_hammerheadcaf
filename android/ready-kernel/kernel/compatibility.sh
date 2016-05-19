@@ -16,4 +16,5 @@ mv /system/etc/sysctl.conf /system/etc/sysctl.conf-bak
 mv /system/bin/thermal-engine-hh /system/bin/thermal-engine-hh-bak
 mv /system/bin/mpdecision /system/bin/mpdecision-bak
 mv /system/lib/hw/power.msm8974.so /system/lib/hw/power.msm8974.so-bak
+mv /system/etc/thermal-engine-8974.conf /system/etc/thermal-engine-8974.conf-bak
 # mv /system/lib/hw/power.hammerhead.so-bak /system/lib/hw/power.hammerhead.so
