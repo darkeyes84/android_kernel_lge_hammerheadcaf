@@ -95,7 +95,7 @@ static void do_input_boost(struct work_struct *work)
 	unsigned int cpu;
 	unsigned nr_cpus = nr_boost_cpus;
 
-	if (cpu_temp_for_touch_boost > 70) {
+	if (cpu_temp_for_touch_boost != 0) {
 		dprintk("Input boost skipped! cpu temp is %d\n",
 			cpu_temp_for_touch_boost);
 		return;

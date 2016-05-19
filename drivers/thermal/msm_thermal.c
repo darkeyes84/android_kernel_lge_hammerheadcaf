@@ -50,7 +50,7 @@ static struct msm_thermal_stat msm_thermal_stats = {
 };
 
 #ifdef CONFIG_ALUCARD_TOUCHSCREEN_BOOST
-int cpu_temp_for_touch_boost;
+int cpu_temp_for_touch_boost = 0;
 #endif
 
 static struct delayed_work check_temp_work;
@@ -170,7 +170,7 @@ static void __ref check_temp(struct work_struct *work)
 			if (saved_max != 0)
 				max_freq = saved_max;
 			else {
-				max_freq = 2265600;
+				max_freq = CPU_FREQ_MAX_DEFAULT;
 				pr_warn("msm_thermal: ERROR! saved_max = 0, falling back to %u\n", max_freq);
 			}
 			update_policy = true;
@@ -235,7 +235,10 @@ static void __ref check_temp(struct work_struct *work)
 	}
 
 #ifdef CONFIG_ALUCARD_TOUCHSCREEN_BOOST
-	cpu_temp_for_touch_boost = temp;
+	if (temp > msm_thermal_info.allowed_low_low)
+		cpu_temp_for_touch_boost = temp;
+	else
+		cpu_temp_for_touch_boost = 0;
 #endif
 
 reschedule:
