@@ -4680,15 +4680,6 @@ static int taiko_volatile(struct snd_soc_codec *ssc, unsigned int reg)
 	if (reg == TAIKO_A_RX_HPH_CNP_EN)
 		return 1;
 
-#if defined(CONFIG_SOUND_CONTROL_HAX_3_GPL) && defined(CONFIG_MACH_LGE)
-	/* HPH gain registers */
-	if (lge_snd_pa_ctrl_locked) {
-		if (reg == TAIKO_A_RX_HPH_L_GAIN ||
-				reg == TAIKO_A_RX_HPH_R_GAIN)
-			return 1;
-	}
-#endif
-
 	if (reg == TAIKO_A_MBHC_INSERT_DET_STATUS)
 		return 1;
 
@@ -4714,9 +4705,9 @@ static int taiko_volatile(struct snd_soc_codec *ssc, unsigned int reg)
 }
 
 #ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
-extern int snd_hax_reg_access(unsigned int);
-extern unsigned int snd_hax_cache_read(unsigned int);
-extern void snd_hax_cache_write(unsigned int, unsigned int);
+extern int snd_reg_access(unsigned int);
+extern unsigned int snd_cache_read(unsigned int);
+extern void snd_cache_write(unsigned int, unsigned int);
 #endif
 
 #ifndef CONFIG_SOUND_CONTROL_HAX_3_GPL
@@ -4747,11 +4738,11 @@ int taiko_write(struct snd_soc_codec *codec, unsigned int reg,
 
 #ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
 	/* In case of no reg access, override with cache value */
-	if (!snd_hax_reg_access(reg) &&
-			snd_hax_cache_read(reg) != -1)
-		value = snd_hax_cache_read(reg);
+	if (!snd_reg_access(reg) &&
+			snd_cache_read(reg) != -1)
+		value = snd_cache_read(reg);
 	else
-		snd_hax_cache_write(reg, value);
+		snd_cache_write(reg, value);
 #endif
 	return wcd9xxx_reg_write(&wcd9xxx->core_res, reg, value);
 }
@@ -7616,10 +7607,8 @@ static struct regulator *taiko_codec_find_regulator(struct snd_soc_codec *codec,
 }
 
 #ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
-struct snd_soc_codec *fauxsound_codec_ptr;
-EXPORT_SYMBOL(fauxsound_codec_ptr);
-int wcd9xxx_hw_revision;
-EXPORT_SYMBOL(wcd9xxx_hw_revision);
+struct snd_soc_codec *snd_engine_codec_ptr;
+EXPORT_SYMBOL(snd_engine_codec_ptr);
 #endif
 
 static int taiko_codec_probe(struct snd_soc_codec *codec)
@@ -7637,19 +7626,13 @@ static int taiko_codec_probe(struct snd_soc_codec *codec)
 
 
 #ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
-        pr_info("taiko codec probe...\n");
-        fauxsound_codec_ptr = codec;
+	pr_info("taiko codec probe...\n");
+	snd_engine_codec_ptr = codec;
 #endif
 
 	codec->control_data = dev_get_drvdata(codec->dev->parent);
 	control = codec->control_data;
 
-#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
-	if (TAIKO_IS_1_0(control->version))
-		wcd9xxx_hw_revision = 1;
-	else
-		wcd9xxx_hw_revision = 2;
-#endif
 	wcd9xxx_ssr_register(control, taiko_device_down,
 			     taiko_post_reset_cb, (void *)codec);
 
