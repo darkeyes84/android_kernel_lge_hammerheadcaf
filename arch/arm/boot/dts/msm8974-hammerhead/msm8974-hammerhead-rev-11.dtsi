@@ -50,3 +50,7 @@
 &msm_gpu {
 	qcom,l2pc-cpu-mask = <0x0000000F>;
 };
+
+&sdhc_1 {
+	qcom,cpu-dma-latency-us = <2 201 501>;
+};
