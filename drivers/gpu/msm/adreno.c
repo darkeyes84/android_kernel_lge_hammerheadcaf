@@ -37,8 +37,8 @@
 
 #include "a3xx_reg.h"
 
-#define DRIVER_VERSION_MAJOR   3
-#define DRIVER_VERSION_MINOR   1
+#define DRIVER_VERSION_MAJOR   4
+#define DRIVER_VERSION_MINOR   0
 
 /* Number of times to try hard reset */
 #define NUM_TIMES_RESET_RETRY 5
@@ -2275,6 +2275,37 @@ static ssize_t _wake_timeout_show(struct device *dev,
 }
 
 /**
+ * _wake_nice_store() - Store nice level for the higher priority GPU start
+ * thread
+ * @dev: device ptr
+ * @attr: Device attribute
+ * @buf: value to write
+ * @count: size of the value to write
+ *
+ */
+static ssize_t _wake_nice_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int ret = kgsl_sysfs_store(buf, &_wake_nice);
+	return ret < 0 ? ret : count;
+}
+
+/**
+ * _wake_nice_show() -  Show nice level for the higher priority GPU start
+ * thread
+ * @dev: device ptr
+ * @attr: Device attribute
+ * @buf: value read
+ */
+static ssize_t _wake_nice_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", _wake_nice);
+}
+
+/**
  * _ft_hang_intr_status_store -  Routine to enable/disable h/w hang interrupt
  * @dev: device ptr
  * @attr: Device attribute
@@ -2354,37 +2385,6 @@ static ssize_t _ft_hang_intr_status_show(struct device *dev,
 		return 0;
 	return snprintf(buf, PAGE_SIZE, "%d\n",
 		test_bit(ADRENO_DEVICE_HANG_INTR, &adreno_dev->priv) ? 1 : 0);
-}
-
-/**
- * _wake_nice_store() - Store nice level for the higher priority GPU start
- * thread
- * @dev: device ptr
- * @attr: Device attribute
- * @buf: value to write
- * @count: size of the value to write
- *
- */
-static ssize_t _wake_nice_store(struct device *dev,
-				     struct device_attribute *attr,
-				     const char *buf, size_t count)
-{
-	int ret = kgsl_sysfs_store(buf, &_wake_nice);
-	return ret < 0 ? ret : count;
-}
-
-/**
- * _wake_nice_show() -  Show nice level for the higher priority GPU start
- * thread
- * @dev: device ptr
- * @attr: Device attribute
- * @buf: value read
- */
-static ssize_t _wake_nice_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%d\n", _wake_nice);
 }
 
 #define FT_DEVICE_ATTR(name) \
@@ -2795,7 +2795,7 @@ int adreno_idle(struct kgsl_device *device)
 			adreno_getreg(adreno_dev, ADRENO_REG_RBBM_STATUS) << 2,
 			0x110, 0x110);
 
-	do {
+	while (time_before(jiffies, wait)) {
 		/*
 		 * If we fault, stop waiting and return an error. The dispatcher
 		 * will clean up the fault from the work queue, but we need to
@@ -2808,19 +2808,7 @@ int adreno_idle(struct kgsl_device *device)
 
 		if (adreno_isidle(device))
 			return 0;
-
-	} while (time_before(jiffies, wait));
-
-	/*
-	 * Under rare conditions, preemption can cause the while loop to exit
-	 * without checking if the gpu is idle. check one last time before we
-	 * return failure.
-	 */
-	if (adreno_gpu_fault(adreno_dev) != 0)
-			return -EDEADLK;
-
-	if (adreno_isidle(device))
-			return 0;
+	}
 
 	return -ETIMEDOUT;
 }

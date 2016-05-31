@@ -1,24 +1,27 @@
 config MSM_KGSL
 	tristate "MSM 3D Graphics driver"
-	default n
 	depends on ARCH_MSM && !ARCH_MSM7X00A && !ARCH_MSM7X25
 	select GENERIC_ALLOCATOR
 	select FW_LOADER
 	select PM_DEVFREQ
 	select DEVFREQ_GOV_SIMPLE_ONDEMAND
 	select DEVFREQ_GOV_PERFORMANCE
+	select DEVFREQ_GOV_POWERSAVE
+	select DEVFREQ_GOV_USERSPACE
 	select DEVFREQ_GOV_MSM_ADRENO_TZ
+	select DEVFREQ_GOV_CONSERVATIVE
 	select SIMPLE_GPU_ALGORITHM
 	select ADRENO_IDLER
+	default n
 	---help---
 	  3D graphics driver. Required to use hardware accelerated
-	  OpenGL ES 2.0 and 1.1.
+	  OpenGL ES 3.0 and 2.0.
 
 config MSM_KGSL_CFF_DUMP
 	bool "Enable KGSL Common File Format (CFF) Dump Feature [Use with caution]"
-	default n
 	depends on MSM_KGSL
 	select RELAY
+	default n
 	---help---
 	  This is an analysis and diagnostic feature only, and should only be
 	  turned on during KGSL GPU diagnostics and will slow down the KGSL
@@ -29,17 +32,17 @@ config MSM_KGSL_CFF_DUMP
 
 config MSM_KGSL_CFF_DUMP_NO_CONTEXT_MEM_DUMP
 	bool "When selected will disable KGSL CFF Dump for context switches"
-	default n
 	depends on MSM_KGSL_CFF_DUMP
+	default n
 	---help---
 	  Dumping all the memory for every context switch can produce quite
 	  huge log files, to reduce this, turn this feature on.
 
 config MSM_ADRENO_DEFAULT_GOVERNOR
 	string "devfreq governor for the adreno core"
+	depends on MSM_KGSL
 	default "msm-adreno-tz" if DEVFREQ_GOV_MSM_ADRENO_TZ
 	default "simple_ondemand"
-	depends on MSM_KGSL
 
 config MSM_KGSL_DRM
 	bool "Build a DRM interface for the MSM_KGSL driver"
@@ -47,8 +50,8 @@ config MSM_KGSL_DRM
 
 config KGSL_PER_PROCESS_PAGE_TABLE
 	bool "Enable Per Process page tables for the KGSL driver"
-	default n
 	depends on !MSM_KGSL_DRM
+	default n
 	---help---
 	  The MMU will use per process pagetables when enabled.
 
@@ -61,8 +64,8 @@ config MSM_KGSL_PAGE_TABLE_SIZE
 
 config MSM_KGSL_PAGE_TABLE_COUNT
 	int "Minimum of concurrent pagetables to support"
-	default 8
 	depends on KGSL_PER_PROCESS_PAGE_TABLE
+	default 8
 	---help---
 	  Specify the number of pagetables to allocate at init time
 	  This is the number of concurrent processes that are guaranteed to
@@ -75,5 +78,5 @@ config MSM_KGSL_MMU_PAGE_FAULT
 
 config MSM_KGSL_DISABLE_SHADOW_WRITES
 	bool "Disable register shadow writes for context switches"
-	default n
 	depends on MSM_KGSL
+	default n

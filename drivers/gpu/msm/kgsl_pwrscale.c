@@ -426,8 +426,8 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 	/* Let's start with 10 ms and tune in later */
 	profile->polling_ms = 10;
 
-	/* do not include duplicate freq. levels */
-	for (i = 0; i < pwr->num_pwrlevels; i++)
+	/* do not include the 'off' level or duplicate freq. levels */
+	for (i = 0; i < (pwr->num_pwrlevels - 1); i++)
 		pwrscale->freq_table[out++] = pwr->pwrlevels[i].gpu_freq;
 
 	/*
@@ -467,7 +467,7 @@ int kgsl_pwrscale_init(struct device *dev, const char *governor)
 	if (IS_ERR(devfreq)) {
 		device->pwrscale.enabled = false;
 		return PTR_ERR(devfreq);
-	}
+    }
 	pwrscale->devfreqptr = devfreq;
 
 	ret = sysfs_create_link(&device->dev->kobj,
