@@ -202,22 +202,19 @@ on property:sys.boot_completed=1
     # enable logging of wake up reasons to kernel logs
     write /sys/module/msm_show_resume_irq/parameters/debug_mask 1
 	
+	# enable simple gpu algorithm
 	write /sys/module/simple_gpu_algorithm/parameters/simple_gpu_activate 1
 	
-	write /sys/devices/fdb00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/max_gpuclk 450000000
+	# disable arch power
+	write /sys/kernel/sched/arch_power 0
 	
-	write /sys/module/alu_t_boost/parameters/input_boost_freq 1497600
-	write /sys/module/alu_t_boost/parameters/input_boost_ms 500
-	write /sys/module/alu_t_boost/parameters/nr_boost_cpus 2
-
-	write /sys/kernel/msm_cpufreq_limit/cpufreq_max_limit_cpu0 2572800
-	write /sys/kernel/msm_cpufreq_limit/cpufreq_max_limit_cpu1 2572800
-	write /sys/kernel/msm_cpufreq_limit/cpufreq_max_limit_cpu2 2572800
-	write /sys/kernel/msm_cpufreq_limit/cpufreq_max_limit_cpu3 2572800	
-	
-    write /sys/devices/system/cpu/cpu0/rq-stats/hotplug_enable 0
-	
-	write /sys/block/mmcblk0/queue/rq_affinity 2
+	# set cpu max freq to default
+	write /sys/kernel/msm_cpufreq_limit/cpufreq_max_limit_cpu0 2265600
+	write /sys/kernel/msm_cpufreq_limit/cpufreq_max_limit_cpu1 2265600
+	write /sys/kernel/msm_cpufreq_limit/cpufreq_max_limit_cpu2 2265600
+	write /sys/kernel/msm_cpufreq_limit/cpufreq_max_limit_cpu3 2265600
+	write /sys/kernel/msm_cpufreq_limit/suspend_max_freq 1958400
+	write /sys/kernel/msm_cpufreq_limit/suspend_min_freq 300000
 	
 on property:persist.sys.ssr.enable_ramdumps=1
     # Subsytem Ramdump collection
