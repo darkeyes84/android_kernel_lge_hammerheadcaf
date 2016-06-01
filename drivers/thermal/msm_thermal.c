@@ -105,7 +105,7 @@ static int update_cpu_max_freq(struct cpufreq_policy *cpu_policy,
 	return ret;
 }
 
-static void check_temp(struct work_struct *work)
+static void __ref check_temp(struct work_struct *work)
 {
 	struct cpufreq_policy *cpu_policy = NULL;
 	struct tsens_device tsens_dev;
@@ -243,8 +243,8 @@ static void check_temp(struct work_struct *work)
 
 reschedule:
 	if (enabled)
-		schedule_delayed_work(&check_temp_work, 
-                                      msecs_to_jiffies(msm_thermal_info.poll_ms));
+		queue_delayed_work(check_temp_workq, &check_temp_work,
+			msecs_to_jiffies(msm_thermal_info.poll_ms));
 
 	return;
 }
@@ -278,8 +278,8 @@ static void enable_msm_thermal(void)
 	enabled = 1;
 
 	/* make sure check_temp is running */
-	schedule_delayed_work(&check_temp_work, 
-                              msecs_to_jiffies(msm_thermal_info.poll_ms));
+	queue_delayed_work(check_temp_workq, &check_temp_work,
+			msecs_to_jiffies(msm_thermal_info.poll_ms));
 
 	pr_info("msm_thermal: Thermal guard enabled.");
 }
@@ -593,12 +593,12 @@ int __init msm_thermal_init(struct msm_thermal_data *pdata)
 
 	enabled = 1;
 
-	check_temp_workq = alloc_workqueue("msm_thermal", WQ_UNBOUND, 1);
+	check_temp_workq = alloc_workqueue("msm_thermal", WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
 	if (!check_temp_workq)
 		BUG_ON(ENOMEM);
 
 	INIT_DELAYED_WORK(&check_temp_work, check_temp);
-	schedule_delayed_work(&check_temp_work, 0);
+	queue_delayed_work(check_temp_workq, &check_temp_work, 0);
 
 	msm_thermal_kobject = kobject_create_and_add("msm_thermal", kernel_kobj);
 	if (msm_thermal_kobject) {

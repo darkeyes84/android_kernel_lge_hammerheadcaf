@@ -68,5 +68,4 @@ int kgsl_devfreq_get_cur_freq(struct device *dev, unsigned long *freq);
 			.get_dev_status = kgsl_devfreq_get_dev_status, \
 			.get_cur_freq = kgsl_devfreq_get_cur_freq, \
 	} } }
-
 #endif

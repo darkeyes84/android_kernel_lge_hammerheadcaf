@@ -17,32 +17,26 @@
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
 #include <linux/kallsyms.h>
-#include <linux/mfd/wcd9xxx/core.h>
 #include <linux/mfd/wcd9xxx/wcd9320_registers.h>
 
 #define SOUND_CONTROL_MAJOR_VERSION	4
-#define SOUND_CONTROL_MINOR_VERSION	2
+#define SOUND_CONTROL_MINOR_VERSION	1
 
 extern struct snd_soc_codec *snd_engine_codec_ptr;
 
-static int snd_ctrl_locked = 1;
-int snd_pa_ctrl_locked = 1;
-
-#ifdef CONFIG_MACH_LGE
-static int wcd9xxx_hw_revision = 1;
-#else
-extern int wcd9xxx_hw_revision;
-#endif
+int snd_ctrl_enabled = 1;
+static int snd_ctrl_locked = 2;
+static int snd_rec_ctrl_locked = 0;
+static int actual_pa_gain = 36;
 
 unsigned int taiko_read(struct snd_soc_codec *codec, unsigned int reg);
 int taiko_write(struct snd_soc_codec *codec, unsigned int reg,
 		unsigned int value);
 
 #define REG_SZ	25
-
-static int cached_regs[] = {-1, -1, -1, -1, 0, 0, -1, -1, -1, -1,
-			1, -1, -1, -1, -1, -1, 3, 3, -1, -1,
-			-1, -1, -1, -1, -1};
+static int cached_regs[] = {6, 6, 0, 0, 0, 0, 0, 0, 0, 0,
+			5, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0 };
 
 void snd_cache_write(unsigned int reg, unsigned int value)
 {
@@ -223,28 +217,24 @@ int snd_reg_access(unsigned int reg)
 	int ret = 1;
 
 	switch (reg) {
-#if 0 /* MM sound driver do not work with PA high/low */
 		/* Analog Power Amp (PA) */
 		case TAIKO_A_RX_HPH_L_GAIN:
 		case TAIKO_A_RX_HPH_R_GAIN:
-			if (snd_ctrl_locked > 0)
+			if (snd_ctrl_locked > 1)
 				ret = 0;
 			break;
 		case TAIKO_A_RX_HPH_L_STATUS:
 		case TAIKO_A_RX_HPH_R_STATUS:
-#endif
-			if (snd_ctrl_locked > 0)
+			if (snd_ctrl_locked > 1)
 				ret = 0;
 			break;
 		/* Digital Headphones Gain */
 		case TAIKO_A_CDC_RX1_VOL_CTL_B2_CTL:
 		case TAIKO_A_CDC_RX2_VOL_CTL_B2_CTL:
-#ifndef CONFIG_MACH_LGE
 		case TAIKO_A_CDC_RX3_VOL_CTL_B2_CTL:
 		case TAIKO_A_CDC_RX4_VOL_CTL_B2_CTL:
 		case TAIKO_A_CDC_RX5_VOL_CTL_B2_CTL:
 		case TAIKO_A_CDC_RX6_VOL_CTL_B2_CTL:
-#endif
 		/* Loud Speaker Gain */
 		case TAIKO_A_CDC_RX7_VOL_CTL_B2_CTL:
 			if (snd_ctrl_locked > 0)
@@ -267,12 +257,10 @@ int snd_reg_access(unsigned int reg)
 		case TAIKO_A_CDC_TX6_VOL_CTL_GAIN:
 		/* Camera MIC Gain */
 		case TAIKO_A_CDC_TX7_VOL_CTL_GAIN:
-#ifndef CONFIG_MACH_LGE
 		case TAIKO_A_CDC_TX8_VOL_CTL_GAIN:
 		case TAIKO_A_CDC_TX9_VOL_CTL_GAIN:
 		case TAIKO_A_CDC_TX10_VOL_CTL_GAIN:
-#endif
-			if (snd_ctrl_locked > 0)
+			if (snd_rec_ctrl_locked > 0)
 				ret = 0;
 			break;
 		default:
@@ -282,24 +270,6 @@ int snd_reg_access(unsigned int reg)
 	return ret;
 }
 EXPORT_SYMBOL(snd_reg_access);
-
-static ssize_t sound_pa_control_locked_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-        return sprintf(buf, "%d\n", snd_pa_ctrl_locked);
-}
-
-static ssize_t sound_pa_control_locked_store(struct kobject *kobj,
-                struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	int inp;
-
-	sscanf(buf, "%d", &inp);
-
-	snd_pa_ctrl_locked = inp;
-
-	return count;
-}
 
 static ssize_t cam_mic_gain_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
@@ -316,15 +286,18 @@ static ssize_t cam_mic_gain_store(struct kobject *kobj,
 
 	sscanf(buf, "%u", &lval);
 
-	if (lval >= 255)
-		lval = 255;
+	if (!snd_ctrl_enabled)
+		return count;
+
+	if (lval >= 20)
+		lval = 20;
 	if (lval < 0)
 		lval = 0;
 
 	snd_ctrl_locked = 0;
 	taiko_write(snd_engine_codec_ptr,
 		TAIKO_A_CDC_TX7_VOL_CTL_GAIN, lval);
-	snd_ctrl_locked = 1;
+	snd_ctrl_locked = 2;
 
 	return count;
 }
@@ -344,15 +317,18 @@ static ssize_t mic_gain_store(struct kobject *kobj,
 
 	sscanf(buf, "%u", &lval);
 
-	if (lval >= 255)
-		lval = 255;
+	if (!snd_ctrl_enabled)
+		return count;
+
+	if (lval >= 20)
+		lval = 20;
 	if (lval < 0)
 		lval = 0;
 
 	snd_ctrl_locked = 0;
 	taiko_write(snd_engine_codec_ptr,
 		TAIKO_A_CDC_TX6_VOL_CTL_GAIN, lval);
-	snd_ctrl_locked = 1;
+	snd_ctrl_locked = 2;
 
 	return count;
 }
@@ -374,10 +350,13 @@ static ssize_t speaker_gain_store(struct kobject *kobj,
 
 	sscanf(buf, "%u %u", &lval, &rval);
 
-	if (lval >= 255)
-		lval = 255;
-	if (rval >= 255)
-		rval = 255;
+	if (!snd_ctrl_enabled)
+		return count;
+
+	if (lval >= 20)
+		lval = 20;
+	if (rval >= 20)
+		rval = 20;
 	if (lval < 0)
 		lval = 0;
 	if (rval < 0)
@@ -389,7 +368,7 @@ static ssize_t speaker_gain_store(struct kobject *kobj,
 		TAIKO_A_CDC_RX7_VOL_CTL_B2_CTL, lval);
 	taiko_write(snd_engine_codec_ptr,
 		TAIKO_A_CDC_RX7_VOL_CTL_B2_CTL, rval);
-	snd_ctrl_locked = 1;
+	snd_ctrl_locked = 2;
 
 	return count;
 }
@@ -411,10 +390,13 @@ static ssize_t headphone_gain_store(struct kobject *kobj,
 
 	sscanf(buf, "%u %u", &lval, &rval);
 
-	if (lval >= 255)
-		lval = 255;
-	if (rval >= 255)
-		rval = 255;
+	if (!snd_ctrl_enabled)
+		return count;
+
+	if (lval >= 20)
+		lval = 20;
+	if (rval >= 20)
+		rval = 20;
 	if (lval < 0)
 		lval = 0;
 	if (rval < 0)
@@ -425,7 +407,7 @@ static ssize_t headphone_gain_store(struct kobject *kobj,
 		TAIKO_A_CDC_RX1_VOL_CTL_B2_CTL, lval);
 	taiko_write(snd_engine_codec_ptr,
 		TAIKO_A_CDC_RX2_VOL_CTL_B2_CTL, rval);
-	snd_ctrl_locked = 1;
+	snd_ctrl_locked = 2;
 
 	return count;
 }
@@ -434,8 +416,7 @@ static ssize_t headphone_pa_gain_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%u %u\n",
-		taiko_read(snd_engine_codec_ptr, TAIKO_A_RX_HPH_L_GAIN),
-		taiko_read(snd_engine_codec_ptr, TAIKO_A_RX_HPH_R_GAIN));
+		actual_pa_gain, actual_pa_gain);
 }
 
 static ssize_t headphone_pa_gain_store(struct kobject *kobj,
@@ -447,10 +428,15 @@ static ssize_t headphone_pa_gain_store(struct kobject *kobj,
 
 	sscanf(buf, "%u %u", &lval, &rval);
 
+	if (!snd_ctrl_enabled)
+		return count;
+
 	snd_ctrl_locked = 0;
 	gain = taiko_read(snd_engine_codec_ptr, TAIKO_A_RX_HPH_L_GAIN);
 	out = (gain & 0xf0) | lval;
 	taiko_write(snd_engine_codec_ptr, TAIKO_A_RX_HPH_L_GAIN, out);
+
+	actual_pa_gain = out;
 
 	status = taiko_read(snd_engine_codec_ptr, TAIKO_A_RX_HPH_L_STATUS);
 	out = (status & 0x0f) | (lval << 4);
@@ -463,22 +449,9 @@ static ssize_t headphone_pa_gain_store(struct kobject *kobj,
 	status = taiko_read(snd_engine_codec_ptr, TAIKO_A_RX_HPH_R_STATUS);
 	out = (status & 0x0f) | (rval << 4);
 	taiko_write(snd_engine_codec_ptr, TAIKO_A_RX_HPH_R_STATUS, out);
-	snd_ctrl_locked = 1;
+	snd_ctrl_locked = 2;
 
 	return count;
-}
-
-static bool calc_checksum(unsigned int a, unsigned int b, unsigned int c)
-{
-	unsigned char chksum = 0;
-
-	chksum = ~((a & 0xff) + (b & 0xff));
-
-	if (chksum == (c & 0xff)) {
-		return true;
-	} else {
-		return false;
-	}
 }
 
 static unsigned int selected_reg = 0xdeadbeef;
@@ -486,6 +459,9 @@ static unsigned int selected_reg = 0xdeadbeef;
 static ssize_t sound_reg_select_store(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count)
 {
+	if (!snd_ctrl_enabled)
+		return count;
+
 	sscanf(buf, "%u", &selected_reg);
 
 	return count;
@@ -504,21 +480,17 @@ static ssize_t sound_reg_read_show(struct kobject *kobj,
 static ssize_t sound_reg_write_store(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	unsigned int out, chksum;
+	unsigned int out;
 
-	sscanf(buf, "%u %u", &out, &chksum);
+	sscanf(buf, "%u", &out);
 
-	if (calc_checksum(out, 0, chksum)) {
-		if (selected_reg != 0xdeadbeef)
-			taiko_write(snd_engine_codec_ptr, selected_reg, out);
-	}
+	if (!snd_ctrl_enabled)
+		return count;
+
+	if (selected_reg != 0xdeadbeef)
+		taiko_write(snd_engine_codec_ptr, selected_reg, out);
+
 	return count;
-}
-
-static ssize_t sound_control_hw_revision_show (struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	return sprintf(buf, "hw_revision: %i\n", wcd9xxx_hw_revision);
 }
 
 static ssize_t sound_control_version_show(struct kobject *kobj,
@@ -529,22 +501,36 @@ static ssize_t sound_control_version_show(struct kobject *kobj,
 			SOUND_CONTROL_MINOR_VERSION);
 }
 
-static ssize_t sound_control_locked_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-        return sprintf(buf, "%d\n", snd_ctrl_locked);
-}
-
-static ssize_t sound_control_locked_store(struct kobject *kobj,
-                struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t sound_control_rec_locked_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int inp;
 
 	sscanf(buf, "%d", &inp);
 
-	snd_ctrl_locked = inp;
+	snd_rec_ctrl_locked = inp;
 
 	return count;
+}
+
+static ssize_t sound_control_rec_locked_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", snd_rec_ctrl_locked);
+}
+
+static ssize_t sound_control_enabled_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	sscanf(buf, "%d", &snd_ctrl_enabled);
+
+	return count;
+}
+
+static ssize_t sound_control_enabled_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", snd_ctrl_enabled);
 }
 
 static struct kobj_attribute sound_reg_sel_attribute =
@@ -595,27 +581,22 @@ static struct kobj_attribute headphone_pa_gain_attribute =
 		headphone_pa_gain_show,
 		headphone_pa_gain_store);
 
-static struct kobj_attribute sound_control_locked_attribute =
+static struct kobj_attribute sound_control_rec_locked_attribute =
 	__ATTR(gpl_sound_control_locked,
 		0666,
-		sound_control_locked_show,
-		sound_control_locked_store);
-
-static struct kobj_attribute sound_pa_control_locked_attribute =
-	__ATTR(gpl_sound_pa_control_locked,
-		0666,
-		sound_pa_control_locked_show,
-		sound_pa_control_locked_store);
+		sound_control_rec_locked_show,
+		sound_control_rec_locked_store);
 
 static struct kobj_attribute sound_control_version_attribute =
 	__ATTR(gpl_sound_control_version,
 		0444,
 		sound_control_version_show, NULL);
 
-static struct kobj_attribute sound_hw_revision_attribute =
-	__ATTR(gpl_sound_control_hw_revision,
-		0444,
-		sound_control_hw_revision_show, NULL);
+static struct kobj_attribute sound_control_enabled_attribute =
+	__ATTR(gpl_sound_control_enabled,
+		0666,
+		sound_control_enabled_show,
+		sound_control_enabled_store);
 
 static struct attribute *sound_control_attrs[] =
 {
@@ -624,13 +605,12 @@ static struct attribute *sound_control_attrs[] =
 	&speaker_gain_attribute.attr,
 	&headphone_gain_attribute.attr,
 	&headphone_pa_gain_attribute.attr,
-	&sound_control_locked_attribute.attr,
-        &sound_pa_control_locked_attribute.attr,
+	&sound_control_rec_locked_attribute.attr,
 	&sound_reg_sel_attribute.attr,
 	&sound_reg_read_attribute.attr,
 	&sound_reg_write_attribute.attr,
-	&sound_hw_revision_attribute.attr,
 	&sound_control_version_attribute.attr,
+	&sound_control_enabled_attribute.attr,
 	NULL,
 };
 
