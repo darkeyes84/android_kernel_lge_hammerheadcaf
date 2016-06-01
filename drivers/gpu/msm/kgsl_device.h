@@ -30,7 +30,6 @@
 #define KGSL_TIMEOUT_DEFAULT        0xFFFFFFFF
 #define KGSL_TIMEOUT_PART           50 /* 50 msec */
 
-
 /* KGSL device state is initialized to INIT when platform_probe		*
  * sucessfully initialized the device.  Once a device has been opened	*
  * (started) it becomes active.  NAP implies that only low latency	*
@@ -828,20 +827,4 @@ static inline void kgsl_mutex_unlock(struct mutex *mutex, atomic64_t *owner)
 	atomic64_set(owner, 0);
 	mutex_unlock(mutex);
 }
-
-/**
- * kgsl_property_read_u32() - Read a u32 property from the device tree
- * @device: Pointer to the KGSL device
- * @prop: String name of the property to query
- * @ptr: Pointer to the variable to store the property
- */
-static inline int kgsl_property_read_u32(struct kgsl_device *device,
-	const char *prop, unsigned int *ptr)
-{
-	struct platform_device *pdev =
-		container_of(device->parentdev, struct platform_device, dev);
-
-	return of_property_read_u32(pdev->dev.of_node, prop, ptr);
-}
-
 #endif  /* __KGSL_DEVICE_H */

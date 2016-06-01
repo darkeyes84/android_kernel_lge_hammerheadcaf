@@ -14,8 +14,8 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/workqueue.h>
-#include <kgsl_device.h>
 
+#include "kgsl_device.h"
 #include "kgsl_trace.h"
 #include "adreno.h"
 
