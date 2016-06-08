@@ -445,6 +445,9 @@ static ssize_t headphone_pa_gain_store(struct kobject *kobj,
 	unsigned int gain, status;
 	unsigned int out;
 
+	if (snd_pa_ctrl_locked)
+		return count;
+
 	sscanf(buf, "%u %u", &lval, &rval);
 
 	snd_ctrl_locked = 0;

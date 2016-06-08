@@ -149,9 +149,11 @@ static void check_temp(struct work_struct *work)
 			continue;
 		}
 
+#if 0
 		/* save pre-throttled max freq value */
 		if ((throttling_indicator == 0) && (cpu == 0))
 			saved_max = cpu_policy->max;
+#endif
 
 		/* low trip point */
 		if ((temp >= msm_thermal_info.allowed_low_high) &&
@@ -167,12 +169,7 @@ static void check_temp(struct work_struct *work)
 		/* low clr point */
 		} else if ((temp < msm_thermal_info.allowed_low_low) &&
 			   (throttling_indicator > 0)) {
-			if (saved_max != 0)
-				max_freq = saved_max;
-			else {
-				max_freq = CPU_FREQ_MAX_DEFAULT;
-				pr_warn("msm_thermal: ERROR! saved_max = 0, falling back to %u\n", max_freq);
-			}
+			max_freq = CPU_FREQ_MAX_DEFAULT;
 			update_policy = true;
 			for (i = 1; i < CONFIG_NR_CPUS; i++) {
 				if (cpu_online(i))
@@ -243,8 +240,8 @@ static void check_temp(struct work_struct *work)
 
 reschedule:
 	if (enabled)
-		schedule_delayed_work(&check_temp_work, 
-                                      msecs_to_jiffies(msm_thermal_info.poll_ms));
+		queue_delayed_work(check_temp_workq, &check_temp_work,
+			msecs_to_jiffies(msm_thermal_info.poll_ms));
 
 	return;
 }
@@ -278,8 +275,8 @@ static void enable_msm_thermal(void)
 	enabled = 1;
 
 	/* make sure check_temp is running */
-	schedule_delayed_work(&check_temp_work, 
-                              msecs_to_jiffies(msm_thermal_info.poll_ms));
+	queue_delayed_work(check_temp_workq, &check_temp_work,
+			msecs_to_jiffies(msm_thermal_info.poll_ms));
 
 	pr_info("msm_thermal: Thermal guard enabled.");
 }
@@ -593,12 +590,13 @@ int __init msm_thermal_init(struct msm_thermal_data *pdata)
 
 	enabled = 1;
 
-	check_temp_workq = alloc_workqueue("msm_thermal", WQ_UNBOUND, 1);
+	check_temp_workq = alloc_workqueue("msm_thermal", WQ_HIGHPRI |
+					WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
 	if (!check_temp_workq)
 		BUG_ON(ENOMEM);
 
 	INIT_DELAYED_WORK(&check_temp_work, check_temp);
-	schedule_delayed_work(&check_temp_work, 0);
+	queue_delayed_work(check_temp_workq, &check_temp_work, 0);
 
 	msm_thermal_kobject = kobject_create_and_add("msm_thermal", kernel_kobj);
 	if (msm_thermal_kobject) {

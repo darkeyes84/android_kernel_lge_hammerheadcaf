@@ -154,10 +154,6 @@ objtree		:= $(CURDIR)
 src		:= $(srctree)
 obj		:= $(objtree)
 
-GRAPHITE	:= -fgraphite -fgraphite-identity \
-		   -floop-flatten -floop-parallelize-all \
-		   -ftree-loop-linear -floop-interchange \
-		   -floop-strip-mine -floop-block
 VPATH		:= $(srctree)$(if $(KBUILD_EXTMOD),:$(KBUILD_EXTMOD))
 
 export srctree objtree VPATH
@@ -249,8 +245,8 @@ CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
 
 HOSTCC       = gcc
 HOSTCXX      = g++
-HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O3 -fomit-frame-pointer -fgcse-las -std=gnu89 $(GRAPHITE)
-HOSTCXXFLAGS = -O3 -fgcse-las $(GRAPHITE)
+HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89
+HOSTCXXFLAGS = -O2
 
 # Decide whether to build built-in, modular, or both.
 # Normally, just do built-in.
@@ -351,19 +347,11 @@ CHECK		= sparse
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
-
-KERNELFLAGS	= -std=gnu89 -O3 -munaligned-access -fgcse-lm -fgcse-sm -fsched-spec-load \
-		  -fforce-addr -fsingle-precision-constant \
-		  -mcpu=cortex-a15 -mtune=cortex-a15 -marm -mfpu=neon-vfpv4 \
-		  -ftree-vectorize -mvectorize-with-neon-quad \
-		  -funsafe-math-optimizations \
-		  $(GRAPHITE)
-MODFLAGS	= -DMODULE $(KERNELFLAGS)
-CFLAGS_MODULE   = $(MODFLAGS)
-AFLAGS_MODULE   = $(MODFLAGS)
-LDFLAGS_MODULE  = --strip-debug
-CFLAGS_KERNEL	= $(KERNELFLAGS)
-AFLAGS_KERNEL	= $(KERNELFLAGS)
+CFLAGS_MODULE   =
+AFLAGS_MODULE   =
+LDFLAGS_MODULE  =
+CFLAGS_KERNEL	=
+AFLAGS_KERNEL	=
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
 
@@ -381,12 +369,13 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
 		   -fno-delete-null-pointer-checks \
-		   -pipe
+		   -std=gnu89 -fno-pic
+
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__
 KBUILD_AFLAGS_MODULE  := -DMODULE
-KBUILD_CFLAGS_MODULE  := -DMODULE
+KBUILD_CFLAGS_MODULE  := -DMODULE -fno-pic
 KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
 
 # Read KERNELRELEASE from include/config/kernel.release (if it exists)
@@ -574,7 +563,7 @@ all: vmlinux
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
 else
-KBUILD_CFLAGS	+= -O3 $(GRAPHITE) $(call cc-disable-warning,maybe-uninitialized,)
+KBUILD_CFLAGS	+= -O2
 endif
 
 include $(srctree)/arch/$(SRCARCH)/Makefile
@@ -582,6 +571,9 @@ include $(srctree)/arch/$(SRCARCH)/Makefile
 ifneq ($(CONFIG_FRAME_WARN),0)
 KBUILD_CFLAGS += $(call cc-option,-Wframe-larger-than=${CONFIG_FRAME_WARN})
 endif
+
+# Tell gcc to never replace conditional load with a non-conditional one
+KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
 
 # Force gcc to behave correct even for buggy distributions
 ifndef CONFIG_CC_STACKPROTECTOR

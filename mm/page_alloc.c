@@ -1051,7 +1051,7 @@ static void change_pageblock_range(struct page *pageblock_page,
  * as well.
  */
 static void try_to_steal_freepages(struct zone *zone, struct page *page,
-				  int start_type, int fallback_type)
+				   int start_type, int fallback_type)
 {
 	int current_order = page_order(page);
 
@@ -1062,7 +1062,6 @@ static void try_to_steal_freepages(struct zone *zone, struct page *page,
 	}
 
 	if (current_order >= pageblock_order / 2 ||
-	    start_type == MIGRATE_RECLAIMABLE ||
 	    start_type == MIGRATE_UNMOVABLE ||
 	    page_group_by_mobility_disabled) {
 		int pages;

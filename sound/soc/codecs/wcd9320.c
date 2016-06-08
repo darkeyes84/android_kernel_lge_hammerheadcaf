@@ -4765,6 +4765,7 @@ static int taiko_volatile(struct snd_soc_codec *ssc, unsigned int reg)
 			return 1;
 	}
 #endif
+
 	if (reg == TAIKO_A_MBHC_INSERT_DET_STATUS)
 		return 1;
 
