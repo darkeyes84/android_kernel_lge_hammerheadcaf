@@ -458,19 +458,22 @@ int mdss_dsi_clk_div_config(struct mdss_panel_info *panel_info,
 	h_period = mdss_panel_get_htotal(panel_info, true);
 	v_period = mdss_panel_get_vtotal(panel_info);
 
-	if (lanes == 0) {
-		pr_warn("%s: forcing mdss_dsi lanes to 1\n", __func__);
-		lanes = 1;
-	}
-
 	if ((frame_rate !=
 	     panel_info->mipi.frame_rate) ||
 	    (!panel_info->clk_rate)) {
 		h_period += panel_info->lcdc.xres_pad;
 		v_period += panel_info->lcdc.yres_pad;
 
-		panel_info->clk_rate = (u32)div_u64(((u64)(h_period * v_period)
-				* frame_rate * bpp * 8), lanes);
+		if (lanes > 0) {
+			panel_info->clk_rate =
+			((h_period * v_period *
+			  frame_rate * bpp * 8)
+			   / lanes);
+		} else {
+			pr_err("%s: forcing mdss_dsi lanes to 1\n", __func__);
+			panel_info->clk_rate =
+				(h_period * v_period * frame_rate * bpp * 8);
+		}
 	}
 	pll_divider_config.clk_rate = panel_info->clk_rate;
 
@@ -538,8 +541,8 @@ int mdss_dsi_clk_div_config(struct mdss_panel_info *panel_info,
 		dsi_pclk.n = mnd_entry->pclk_n;
 		dsi_pclk.d = mnd_entry->pclk_d;
 	}
-	dsi_pclk_rate = (u32)div_u64(((u64)(panel_info->clk_rate) * lanes),
-			(8 * bpp));
+	dsi_pclk_rate = (((pll_divider_config.clk_rate) * lanes)
+				      / (8 * bpp));
 
 	if ((dsi_pclk_rate < 3300000) || (dsi_pclk_rate > 250000000))
 		dsi_pclk_rate = 35000000;
@@ -695,49 +698,6 @@ static void mdss_dsi_link_clk_stop(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	clk_disable_unprepare(ctrl_pdata->byte_clk);
 }
 
-static bool mdss_dsi_is_ulps_req_valid(struct mdss_dsi_ctrl_pdata *ctrl,
-		int enable)
-{
-	struct mdss_panel_data *pdata = &ctrl->panel_data;
-	struct mdss_panel_info *pinfo = &pdata->panel_info;
-
-	pr_debug("%s: checking ulps req validity for ctrl%d\n",
-		__func__, ctrl->ndx);
-
-	if (!mdss_dsi_ulps_feature_enabled(pdata)) {
-		pr_debug("%s: ULPS feature is not enabled\n", __func__);
-		return false;
-	}
-
-	/*
-	 * No need to enter ULPS when transitioning from splash screen to
-	 * boot animation since it is expected that the clocks would be turned
-	 * right back on.
-	 */
-	if (enable && pinfo->cont_splash_enabled) {
-		pr_debug("%s: skip ULPS config with splash screen enabled\n",
-			__func__);
-		return false;
-	}
-
-	/*
-	 * No need to enable ULPS if panel is not yet initialized.
-	 * However, this should be allowed in following usecases:
-	 *   1. If ULPS during suspend feature is enabled, where we
-	 *      configure the lanes in ULPS after turning off the panel.
-	 *   2. When coming out of idle PC with clamps enabled, where we
-	 *      transition the controller HW state back to ULPS prior to
-	 *      disabling ULPS.
-	 */
-	if (enable && !ctrl->mmss_clamp &&
-		!(ctrl->ctrl_state & CTRL_STATE_PANEL_INIT)) {
-		pr_debug("%s: panel not yet initialized\n", __func__);
-		return false;
-	}
-
-	return true;
-}
-
 /**
  * mdss_dsi_ulps_config() - Program DSI lanes to enter/exit ULPS mode
  * @ctrl: pointer to DSI controller structure
@@ -770,9 +730,20 @@ static int mdss_dsi_ulps_config(struct mdss_dsi_ctrl_pdata *ctrl,
 	pinfo = &pdata->panel_info;
 	mipi = &pinfo->mipi;
 
-	if (!mdss_dsi_is_ulps_req_valid(ctrl, enable)) {
-		pr_debug("%s: skiping ULPS config for ctrl%d, enable=%d\n",
-			__func__, ctrl->ndx, enable);
+	if (!mdss_dsi_ulps_feature_enabled(pdata)) {
+		pr_debug("%s: ULPS feature not supported. enable=%d\n",
+			__func__, enable);
+		return -ENOTSUPP;
+	}
+
+	/*
+	 * No need to enter ULPS when transitioning from splash screen to
+	 * boot animation since it is expected that the clocks would be turned
+	 * right back on.
+	 */
+	if (pinfo->cont_splash_enabled) {
+		pr_debug("%s: skip ULPS config with splash screen enabled\n",
+			__func__);
 		return 0;
 	}
 
@@ -791,31 +762,11 @@ static int mdss_dsi_ulps_config(struct mdss_dsi_ctrl_pdata *ctrl,
 	if (mipi->data_lane3)
 		active_lanes |= BIT(3);
 
-	pr_debug("%s: configuring ulps (%s) for ctrl%d, active lanes=0x%08x,clamps=%s\n",
+	pr_debug("%s: configuring ulps (%s) for ctrl%d, active lanes=0x%08x\n",
 		__func__, (enable ? "on" : "off"), ctrl->ndx,
-		active_lanes, ctrl->mmss_clamp ? "enabled" : "disabled");
+		active_lanes);
 
 	if (enable && !ctrl->ulps) {
-		/*
-		 * Ensure that the lanes are idle prior to placing a ULPS entry
-		 * request. This is needed to ensure that there is no overlap
-		 * between any HS or LP commands being sent out on the lane and
-		 * a potential ULPS entry request.
-		 *
-		 * This check needs to be avoided when we are resuming from idle
-		 * power collapse and just restoring the controller state to
-		 * ULPS with the clamps still in place.
-		 */
-		if (!ctrl->mmss_clamp) {
-			ret = mdss_dsi_wait_for_lane_idle(ctrl);
-			if (ret) {
-				pr_warn("%s: lanes not idle, skip ulps\n",
-					__func__);
-				ret = 0;
-				goto error;
-			}
-		}
-
 		/*
 		 * ULPS Entry Request.
 		 * Wait for a short duration to ensure that the lanes
@@ -1099,15 +1050,6 @@ static int mdss_dsi_core_power_ctrl(struct mdss_dsi_ctrl_pdata *ctrl,
 			rc = mdss_dsi_clamp_ctrl(ctrl, 1);
 			if (rc)
 				pr_err("%s: Failed to enable dsi clamps. rc=%d\n",
-					__func__, rc);
-		} else {
-			/*
-			* Make sure that controller is not in ULPS state when
-			* the DSI link is not active.
-			*/
-			rc = mdss_dsi_ulps_config(ctrl, 0);
-			if (rc)
-				pr_err("%s: failed to disable ulps. rc=%d\n",
 					__func__, rc);
 		}
 

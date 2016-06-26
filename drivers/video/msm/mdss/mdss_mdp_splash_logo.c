@@ -271,13 +271,7 @@ static struct mdss_mdp_pipe *mdss_mdp_splash_get_pipe(
 		return NULL;
 	}
 
-	buf = mdss_mdp_overlay_buf_alloc(mfd, pipe);
-	if (!buf) {
-		pr_err("unable to allocate memory for splash buffer\n");
-		mdss_mdp_pipe_unmap(pipe);
-		return NULL;
-	}
-
+	buf = &pipe->back_buf;
 	buf->p[0].addr = mfd->splash_info.iova;
 	buf->p[0].len = image_size;
 	buf->num_planes = 1;
@@ -506,7 +500,7 @@ static int mdss_mdp_splash_thread(void *data)
 	unlock_fb_info(mfd->fbi);
 
 	mutex_lock(&mfd->bl_lock);
-	mfd->allow_bl_update = true;
+	mfd->bl_updated = true;
 	mdss_fb_set_backlight(mfd, mfd->panel_info->bl_max >> 1);
 	mutex_unlock(&mfd->bl_lock);
 

@@ -20,7 +20,7 @@
 #include "mdss_mdp_trace.h"
 
 #define VSYNC_EXPIRE_TICK 6
-#define MAX_RECOVERY_TRIALS 10
+
 #define MAX_SESSIONS 2
 
 #define STOP_TIMEOUT(hz) msecs_to_jiffies((1000 / hz) * (VSYNC_EXPIRE_TICK + 2))
@@ -347,7 +347,6 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 	struct mdss_mdp_cmd_ctx *ctx = ctl->priv_data;
 	struct mdss_mdp_vsync_handler *tmp;
 	ktime_t vsync_time;
-	u32 status;
 
 	if (!ctx) {
 		pr_err("%s: invalid ctx\n", __func__);
@@ -376,9 +375,7 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 			       atomic_read(&ctx->koff_cnt));
 		if (mdss_mdp_cmd_do_notifier(ctx)) {
 			atomic_inc(&ctx->pp_done_cnt);
-			status = mdss_mdp_ctl_perf_get_transaction_status(ctl);
-			if (status == 0)
-				schedule_work(&ctx->pp_done_work);
+			schedule_work(&ctx->pp_done_work);
 		}
 		wake_up_all(&ctx->pp_waitq);
 	} else {
@@ -427,14 +424,11 @@ static int mdss_mdp_cmd_add_vsync_handler(struct mdss_mdp_ctl *ctl,
 	struct mdss_mdp_cmd_ctx *ctx, *sctx = NULL;
 	unsigned long flags;
 	bool enable_rdptr = false;
-	int ret = 0;
 
-	mutex_lock(&ctl->offlock);
 	ctx = (struct mdss_mdp_cmd_ctx *) ctl->priv_data;
 	if (!ctx) {
 		pr_err("%s: invalid ctx\n", __func__);
-		ret = -ENODEV;
-		goto done;
+		return -ENODEV;
 	}
 
 	MDSS_XLOG(ctl->num, ctx->koff_cnt, ctx->clk_enabled,
@@ -463,10 +457,7 @@ static int mdss_mdp_cmd_add_vsync_handler(struct mdss_mdp_ctl *ctl,
 			mdss_mdp_cmd_clk_on(sctx);
 	}
 
-done:
-	mutex_unlock(&ctl->offlock);
-
-	return ret;
+	return 0;
 }
 
 static int mdss_mdp_cmd_remove_vsync_handler(struct mdss_mdp_ctl *ctl,
@@ -575,10 +566,7 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 	}
 
 	if (rc <= 0) {
-		if (ctx->pp_timeout_report_cnt == 0) {
-			MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl", "dsi0_phy",
-				"dsi1_ctrl", "dsi1_phy");
-		} else if (ctx->pp_timeout_report_cnt == MAX_RECOVERY_TRIALS) {
+		if (!ctx->pp_timeout_report_cnt) {
 			WARN(1, "cmd kickoff timed out (%d) ctl=%d\n",
 					rc, ctl->num);
 			MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0", "dsi1",
@@ -592,8 +580,6 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 		rc = 0;
 		ctx->pp_timeout_report_cnt = 0;
 	}
-
-	cancel_work_sync(&ctx->pp_done_work);
 
 	/* signal any pending ping pong done events */
 	while (atomic_add_unless(&ctx->pp_done_cnt, -1, 0))

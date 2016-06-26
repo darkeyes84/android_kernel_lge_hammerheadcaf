@@ -21,7 +21,6 @@
 #include <linux/gpio.h>
 #include <linux/err.h>
 #include <linux/regulator/consumer.h>
-#include <linux/pm_qos.h>
 
 #ifdef CONFIG_STATE_NOTIFIER
 #include <linux/state_notifier.h>
@@ -35,60 +34,6 @@
 #include "mdss_panel.h"
 #include "mdss_dsi.h"
 #include "mdss_debug.h"
-
-#define DSI_DISABLE_PC_LATENCY 100
-#define DSI_ENABLE_PC_LATENCY PM_QOS_DEFAULT_VALUE
-
-static struct pm_qos_request mdss_dsi_pm_qos_request;
-
-static void mdss_dsi_pm_qos_add_request(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
-{
-	struct irq_info *irq_info;
-
-	if (!ctrl_pdata)
-		return;
-
-	irq_info = ctrl_pdata->dsi_hw->irq_info;
-
-	if (!irq_info)
-		return;
-
-	mutex_lock(&ctrl_pdata->pm_qos_lock);
-	if (!ctrl_pdata->pm_qos_req_cnt) {
-		pr_debug("%s: add request irq\n", __func__);
-
-		mdss_dsi_pm_qos_request.type = PM_QOS_REQ_AFFINE_IRQ;
-		mdss_dsi_pm_qos_request.irq = irq_info->irq;
-		pm_qos_add_request(&mdss_dsi_pm_qos_request,
-			PM_QOS_CPU_DMA_LATENCY, PM_QOS_DEFAULT_VALUE);
-	}
-	ctrl_pdata->pm_qos_req_cnt++;
-	mutex_unlock(&ctrl_pdata->pm_qos_lock);
-}
-
-static void mdss_dsi_pm_qos_remove_request(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
-{
-	if (!ctrl_pdata)
-		return;
-
-	mutex_lock(&ctrl_pdata->pm_qos_lock);
-	if (ctrl_pdata->pm_qos_req_cnt) {
-		ctrl_pdata->pm_qos_req_cnt--;
-		if (!ctrl_pdata->pm_qos_req_cnt) {
-			pr_debug("%s: remove request", __func__);
-			pm_qos_remove_request(&mdss_dsi_pm_qos_request);
-		}
-	} else {
-		pr_warn("%s: unbalanced pm_qos ref count\n", __func__);
-	}
-	mutex_unlock(&ctrl_pdata->pm_qos_lock);
-}
-
-static void mdss_dsi_pm_qos_update_request(int val)
-{
-	pr_debug("%s: update request %d", __func__, val);
-	pm_qos_update_request(&mdss_dsi_pm_qos_request, val);
-}
 
 static int mdss_dsi_pinctrl_set_state(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 					bool active);
@@ -815,8 +760,6 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 	pr_debug("%s+: ctrl=%p ndx=%d cur_blank_state=%d\n", __func__,
 		ctrl_pdata, ctrl_pdata->ndx, pdata->panel_info.blank_state);
 
-	mdss_dsi_pm_qos_update_request(DSI_DISABLE_PC_LATENCY);
-
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 1);
 
 	if (pdata->panel_info.blank_state == MDSS_PANEL_BLANK_LOW_POWER) {
@@ -844,9 +787,6 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 
 error:
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
-
-	mdss_dsi_pm_qos_update_request(DSI_ENABLE_PC_LATENCY);
-
 	pr_debug("%s-:\n", __func__);
 
 	return ret;
@@ -1140,7 +1080,6 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 #ifdef CONFIG_MACH_LGE
 		lcd_notifier_call_chain(LCD_EVENT_ON_START, NULL);
 #endif
-		mdss_dsi_get_hw_revision(ctrl_pdata);
 		rc = mdss_dsi_on(pdata);
 		mdss_dsi_op_mode_config(pdata->panel_info.mipi.mode,
 							pdata);
@@ -1431,9 +1370,6 @@ static int __devinit mdss_dsi_ctrl_probe(struct platform_device *pdev)
 		mdss_dsi_op_mode_config(pinfo->mipi.mode,
 				&ctrl_pdata->panel_data);
 
-	mutex_init(&ctrl_pdata->pm_qos_lock);
-	mdss_dsi_pm_qos_add_request(ctrl_pdata);
-
 	pr_debug("%s: Dsi Ctrl->%d initialized\n", __func__, index);
 	return 0;
 
@@ -1459,8 +1395,6 @@ static int __devexit mdss_dsi_ctrl_remove(struct platform_device *pdev)
 		pr_err("%s: no driver data\n", __func__);
 		return -ENODEV;
 	}
-
-	mdss_dsi_pm_qos_remove_request(ctrl_pdata);
 
 	for (i = DSI_MAX_PM - 1; i >= 0; i--) {
 		if (msm_dss_config_vreg(&pdev->dev,
@@ -1544,29 +1478,6 @@ int mdss_dsi_retrieve_ctrl_resources(struct platform_device *pdev, int mode,
 	return 0;
 }
 
-static int mdss_dsi_irq_init(struct device *dev, int irq_no,
-			struct mdss_dsi_ctrl_pdata *ctrl)
-{
-	int ret;
-
-	ret = devm_request_irq(dev, irq_no, mdss_dsi_isr,
-				IRQF_DISABLED, "DSI", ctrl);
-	if (ret) {
-		pr_err("msm_dsi_irq_init request_irq() failed!\n");
-	} else {
-		ctrl->dsi_hw->irq_info =
-			kzalloc(sizeof(struct irq_info), GFP_KERNEL);
-		if (!ctrl->dsi_hw->irq_info) {
-			pr_err("no mem to save irq info: kzalloc fail\n");
-			return -ENOMEM;
-		}
-		ctrl->dsi_hw->irq_info->irq = irq_no;
-		ctrl->dsi_hw->irq_info->irq_ena = false;
-	}
-
-	return ret;
-}
-
 int dsi_panel_device_register(struct device_node *pan_node,
 				struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -1576,7 +1487,6 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	struct platform_device *ctrl_pdev = NULL;
 	const char *data;
 	struct mdss_panel_info *pinfo = &(ctrl_pdata->panel_data.panel_info);
-	struct resource *res;
 
 	mipi  = &(pinfo->mipi);
 
@@ -1722,26 +1632,6 @@ int dsi_panel_device_register(struct device_node *pan_node,
 					     ctrl_pdata)) {
 		pr_err("%s: unable to get Dsi controller res\n", __func__);
 		return -EPERM;
-	}
-
-	ctrl_pdata->dsi_irq_line = of_property_read_bool(
-				ctrl_pdev->dev.of_node, "qcom,dsi-irq-line");
-
-	if (ctrl_pdata->dsi_irq_line) {
-		/* DSI has it's own irq line */
-		res = platform_get_resource(ctrl_pdev, IORESOURCE_IRQ, 0);
-		if (!res || res->start == 0) {
-			pr_err("%s:%d unable to get the MDSS irq resources\n",
-							__func__, __LINE__);
-			rc = -ENODEV;
-		}
-		rc = mdss_dsi_irq_init(&ctrl_pdev->dev, res->start,
-						   ctrl_pdata);
-		if (rc) {
-			dev_err(&ctrl_pdev->dev, "%s: failed to init irq\n",
-							__func__);
-			return rc;
-		}
 	}
 
 	ctrl_pdata->panel_data.event_handler = mdss_dsi_event_handler;
