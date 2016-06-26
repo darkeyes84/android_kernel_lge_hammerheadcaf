@@ -1,7 +1,7 @@
 /*
  * Linux Wireless Extensions support
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2013, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_iw.h 467328 2014-04-03 01:23:40Z $
+ * $Id: wl_iw.h 291086 2011-10-21 01:17:24Z $
  */
 
 #ifndef _wl_iw_h_
@@ -79,6 +79,7 @@ struct cntry_locales_custom {
 #define	WL_IW_RSSI_INVALID	 0	/* invalid RSSI value */
 #define MAX_WX_STRING 80
 #define SSID_FMT_BUF_LEN	((4 * 32) + 1)
+#define isprint(c) bcm_isprint(c)
 #define WL_IW_SET_ACTIVE_SCAN	(SIOCIWFIRSTPRIV+1)
 #define WL_IW_GET_RSSI			(SIOCIWFIRSTPRIV+3)
 #define WL_IW_SET_PASSIVE_SCAN	(SIOCIWFIRSTPRIV+5)

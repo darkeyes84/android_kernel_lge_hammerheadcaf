@@ -3,14 +3,14 @@
  *     export functions to client drivers
  *     abstract OS and BUS specific details of SDIO
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
- * 
+ * Copyright (C) 1999-2013, Broadcom Corporation
+ *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -18,12 +18,12 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: bcmsdh.h 450676 2014-01-22 22:45:13Z $
+ * $Id: bcmsdh.h 414953 2013-07-26 17:36:27Z $
  */
 
 /**
@@ -40,20 +40,14 @@ extern const uint bcmsdh_msglevel;
 #define BCMSDH_ERROR(x)
 #define BCMSDH_INFO(x)
 
-#if defined(BCMSDIO) && (defined(BCMSDIOH_STD) || defined(BCMSDIOH_BCM) || \
-	defined(BCMSDIOH_SPI))
+#if (defined(BCMSDIOH_STD) || defined(BCMSDIOH_BCM) || defined(BCMSDIOH_SPI))
 #define BCMSDH_ADAPTER
 #endif /* BCMSDIO && (BCMSDIOH_STD || BCMSDIOH_BCM || BCMSDIOH_SPI) */
 
-/* forward declarations */
-typedef struct bcmsdh_info bcmsdh_info_t;
-typedef void (*bcmsdh_cb_fn_t)(void *);
-
-extern bcmsdh_info_t *bcmsdh_attach(osl_t *osh, void *sdioh, ulong *regsva);
 /**
  * BCMSDH API context
  */
-struct bcmsdh_info
+typedef struct bcmsdh_info
 {
 	bool	init_success;	/* underlying driver successfully attached */
 	void	*sdioh;		/* handler for sdioh */
@@ -61,13 +55,26 @@ struct bcmsdh_info
 	osl_t   *osh;
 	bool	regfail;	/* Save status of last reg_read/reg_write call */
 	uint32	sbwad;		/* Save backplane window address */
-	void	*os_cxt;        /* Pointer to per-OS private data */
 #ifdef DHD_WAKE_STATUS
 	unsigned int	total_wake_count;
 	int	pkt_wake;
 	int	wake_irq;
 #endif
-};
+} bcmsdh_info_t;
+
+/* forward declarations */
+typedef void (*bcmsdh_cb_fn_t)(void *);
+
+extern struct device *pm_dev;
+
+/* Attach and build an interface to the underlying SD host driver.
+ *  - Allocates resources (structs, arrays, mem, OS handles, etc) needed by bcmsdh.
+ *  - Returns the bcmsdh handle and virtual address base for register access.
+ *    The returned handle should be used in all subsequent calls, but the bcmsh
+ *    implementation may maintain a single "default" handle (e.g. the first or
+ *    most recent one) to enable single-instance implementations to pass NULL.
+ */
+extern bcmsdh_info_t *bcmsdh_attach(osl_t *osh, void *cfghdl, void **regsva, uint irq);
 
 /* Detach - freeup resources allocated in attach */
 extern int bcmsdh_detach(osl_t *osh, void *sdh);
@@ -92,7 +99,7 @@ extern bool bcmsdh_intr_pending(void *sdh);
 
 #ifdef DHD_WAKE_STATUS
 int bcmsdh_get_total_wake(bcmsdh_info_t *bcmsdh);
-int bcmsdh_set_get_wake(bcmsdh_info_t *bcmsdh, int flag);
+int bcmsdh_set_get_wake(int flag);
 #endif
 
 /* Register a callback to be called if and when bcmsdh detects
@@ -205,18 +212,16 @@ extern int bcmsdh_reset(bcmsdh_info_t *sdh);
 
 /* helper functions */
 
+extern void *bcmsdh_get_sdioh(bcmsdh_info_t *sdh);
+
 /* callback functions */
 typedef struct {
-	/* probe the device */
-	void *(*probe)(uint16 vend_id, uint16 dev_id, uint16 bus, uint16 slot,
+	/* attach to device */
+	void *(*attach)(uint16 vend_id, uint16 dev_id, uint16 bus, uint16 slot,
 	                uint16 func, uint bustype, void * regsva, osl_t * osh,
 	                void * param);
-	/* remove the device */
-	void (*remove)(void *context);
-	/* can we suspend now */
-	int (*suspend)(void *context);
-	/* resume from suspend */
-	int (*resume)(void *context);
+	/* detach from device */
+	void (*detach)(void *ch);
 } bcmsdh_driver_t;
 
 /* platform specific/high level functions */
@@ -229,17 +234,11 @@ extern int bcmsdh_reg_sdio_notify(void* semaphore);
 extern void bcmsdh_unreg_sdio_notify(void);
 
 #if defined(OOB_INTR_ONLY)
-extern int bcmsdh_oob_intr_register(bcmsdh_info_t *bcmsdh, bcmsdh_cb_fn_t oob_irq_handler,
-	void* oob_irq_handler_context);
-extern void bcmsdh_oob_intr_unregister(bcmsdh_info_t *sdh);
-extern void bcmsdh_oob_intr_set(bcmsdh_info_t *sdh, bool enable);
-#endif 
-extern void bcmsdh_dev_pm_stay_awake(bcmsdh_info_t *sdh);
-extern void bcmsdh_dev_relax(bcmsdh_info_t *sdh);
-extern bool bcmsdh_dev_pm_enabled(bcmsdh_info_t *sdh);
-
-int bcmsdh_suspend(bcmsdh_info_t *bcmsdh);
-int bcmsdh_resume(bcmsdh_info_t *bcmsdh);
+extern int bcmsdh_register_oob_intr(void * dhdp);
+extern void bcmsdh_unregister_oob_intr(void);
+extern void bcmsdh_oob_intr_set(bool enable);
+extern bool bcmsdh_is_oob_intr_registered(void);
+#endif
 
 /* Function to pass device-status bits to DHD. */
 extern uint32 bcmsdh_get_dstatus(void *sdh);
@@ -258,7 +257,5 @@ extern int bcmsdh_gpio_init(void *sd);
 extern bool bcmsdh_gpioin(void *sd, uint32 gpio);
 extern int bcmsdh_gpioouten(void *sd, uint32 gpio);
 extern int bcmsdh_gpioout(void *sd, uint32 gpio, bool enab);
-
-extern void bcmsdh_retune_hold(void *sdh, bool hold);
 
 #endif	/* _bcmsdh_h_ */

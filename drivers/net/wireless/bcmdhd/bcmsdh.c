@@ -2,7 +2,7 @@
  *  BCMSDH interface glue
  *  implement bcmsdh API for SDIOH driver
  *
- * Copyright (C) 1999-2014, Broadcom Corporation
+ * Copyright (C) 1999-2013, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -22,7 +22,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: bcmsdh.c 450676 2014-01-22 22:45:13Z $
+ * $Id: bcmsdh.c 373331 2012-12-07 04:46:22Z $
  */
 
 /**
@@ -42,6 +42,7 @@
 #include <bcmsdh.h>	/* BRCM API for SDIO clients (such as wl, dhd) */
 #include <bcmsdbus.h>	/* common SDIO/controller interface */
 #include <sbsdio.h>	/* SDIO device core hardware definitions. */
+
 #include <sdio.h>	/* SDIO Device and Protocol Specs */
 
 #define SDIOH_API_ACCESS_RETRY_LIMIT	2
@@ -49,7 +50,6 @@ const uint bcmsdh_msglevel = BCMSDH_ERROR_VAL;
 
 /* local copy of bcm sd handler */
 bcmsdh_info_t * l_bcmsdh = NULL;
-
 
 #if defined(OOB_INTR_ONLY) && defined(HW_OOB)
 extern int
@@ -72,7 +72,7 @@ bcmsdh_enable_hw_oob_intr(bcmsdh_info_t *sdh, bool enable)
  * @return bcmsdh_info_t Handle to BCMSDH context.
  */
 bcmsdh_info_t *
-bcmsdh_attach(osl_t *osh, void *sdioh, ulong *regsva)
+bcmsdh_attach(osl_t *osh, void *cfghdl, void **regsva, uint irq)
 {
 	bcmsdh_info_t *bcmsdh;
 
@@ -81,17 +81,22 @@ bcmsdh_attach(osl_t *osh, void *sdioh, ulong *regsva)
 		return NULL;
 	}
 	bzero((char *)bcmsdh, sizeof(bcmsdh_info_t));
-	bcmsdh->sdioh = sdioh;
-	bcmsdh->osh = osh;
-	bcmsdh->init_success = TRUE;
-	*regsva = SI_ENUM_BASE;
-
-	/* Report the BAR, to fix if needed */
-	bcmsdh->sbwad = SI_ENUM_BASE;
 
 	/* save the handler locally */
 	l_bcmsdh = bcmsdh;
 
+	if (!(bcmsdh->sdioh = sdioh_attach(osh, cfghdl, irq))) {
+		bcmsdh_detach(osh, bcmsdh);
+		return NULL;
+	}
+
+	bcmsdh->osh = osh;
+	bcmsdh->init_success = TRUE;
+
+	*regsva = (uint32 *)SI_ENUM_BASE;
+
+	/* Report the BAR, to fix if needed */
+	bcmsdh->sbwad = SI_ENUM_BASE;
 	return bcmsdh;
 }
 
@@ -101,11 +106,14 @@ bcmsdh_detach(osl_t *osh, void *sdh)
 	bcmsdh_info_t *bcmsdh = (bcmsdh_info_t *)sdh;
 
 	if (bcmsdh != NULL) {
+		if (bcmsdh->sdioh) {
+			sdioh_detach(osh, bcmsdh->sdioh);
+			bcmsdh->sdioh = NULL;
+		}
 		MFREE(osh, bcmsdh, sizeof(bcmsdh_info_t));
 	}
 
 	l_bcmsdh = NULL;
-
 	return 0;
 }
 
@@ -593,6 +601,8 @@ int
 bcmsdh_waitlockfree(void *sdh)
 {
 	bcmsdh_info_t *bcmsdh = (bcmsdh_info_t *)sdh;
+	if (!bcmsdh)
+		bcmsdh = l_bcmsdh;
 
 	return sdioh_waitlockfree(bcmsdh->sdioh);
 }
@@ -704,11 +714,31 @@ bcmsdh_gpioout(void *sdh, uint32 gpio, bool enab)
 	return sdioh_gpioout(sd, gpio, enab);
 }
 
+#ifdef BCMSDIOH_TXGLOM
 void
-bcmsdh_retune_hold(void *sdh, bool hold)
+bcmsdh_glom_post(void *sdh, uint8 *frame, void *pkt, uint len)
 {
-	bcmsdh_info_t *p = (bcmsdh_info_t *)sdh;
-	sdioh_info_t *sd = (sdioh_info_t *)(p->sdioh);
-
-	sdioh_retune_hold(sd, hold);
+	bcmsdh_info_t *bcmsdh = (bcmsdh_info_t *)sdh;
+	sdioh_glom_post(bcmsdh->sdioh, frame, pkt, len);
 }
+
+void
+bcmsdh_glom_clear(void *sdh)
+{
+	bcmsdh_info_t *bcmsdh = (bcmsdh_info_t *)sdh;
+	sdioh_glom_clear(bcmsdh->sdioh);
+}
+
+uint
+bcmsdh_set_mode(void *sdh, uint mode)
+{
+	bcmsdh_info_t *bcmsdh = (bcmsdh_info_t *)sdh;
+	return (sdioh_set_mode(bcmsdh->sdioh, mode));
+}
+
+bool
+bcmsdh_glom_enabled(void)
+{
+	return (sdioh_glom_enabled());
+}
+#endif /* BCMSDIOH_TXGLOM */
