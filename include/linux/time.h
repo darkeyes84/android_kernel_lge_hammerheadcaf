@@ -115,6 +115,7 @@ static inline struct timespec timespec_sub(struct timespec lhs,
 
 extern void read_persistent_clock(struct timespec *ts);
 extern void read_boot_clock(struct timespec *ts);
+extern int persistent_clock_is_local;
 extern int update_persistent_clock(struct timespec now);
 void timekeeping_init(void);
 extern int timekeeping_suspended;
@@ -297,6 +298,7 @@ struct itimerval {
 #define CLOCK_BOOTTIME			7
 #define CLOCK_REALTIME_ALARM		8
 #define CLOCK_BOOTTIME_ALARM		9
+#define CLOCK_POWEROFF_ALARM		12
 
 /*
  * The IDs of various hardware clocks:
