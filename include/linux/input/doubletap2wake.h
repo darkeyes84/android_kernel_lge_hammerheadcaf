@@ -22,5 +22,6 @@
 #define _LINUX_DOUBLETAP2WAKE_H
 
 extern int dt2w_switch;
+extern int vib_strength;
 
 #endif	/* _LINUX_DOUBLETAP2WAKE_H */

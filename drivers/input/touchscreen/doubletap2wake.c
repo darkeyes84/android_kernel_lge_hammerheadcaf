@@ -24,7 +24,6 @@
 #include <linux/types.h>
 #include <linux/delay.h>
 #include <linux/init.h>
-#include <linux/init.h>
 #include <linux/err.h>
 #include <linux/input/doubletap2wake.h>
 #include <linux/slab.h>
@@ -58,7 +57,11 @@ MODULE_LICENSE("GPLv2");
 
 #define DT2W_PWRKEY_DUR		60
 #define DT2W_FEATHER		150
-#define DT2W_TIME           	600
+#define DT2W_TIME           600
+#define VIB_STRENGTH		20
+
+extern void set_vibrate(int value);
+int vib_strength = VIB_STRENGTH;
 
 /* Resources */
 int dt2w_switch = DT2W_DEFAULT;
@@ -179,6 +182,7 @@ static void detect_doubletap2wake(int x, int y, bool st)
 		if ((touch_nr > 1)) {
 			pr_info(LOGTAG"ON\n");
 			exec_count = false;
+			set_vibrate(vib_strength);
 			doubletap2wake_pwrtrigger();
 			doubletap2wake_reset();
 		}
@@ -368,6 +372,27 @@ static ssize_t dt2w_version_dump(struct device *dev,
 static DEVICE_ATTR(doubletap2wake_version, (S_IWUSR|S_IRUGO),
 	dt2w_version_show, dt2w_version_dump);
 
+static ssize_t vib_strength_show(struct device *dev,
+		 struct device_attribute *attr, char *buf)
+{
+	size_t count = 0;
+	count += sprintf(buf, "%d\n", vib_strength);
+	return count;
+}
+
+static ssize_t vib_strength_dump(struct device *dev,
+		 struct device_attribute *attr, const char *buf, size_t count)
+{
+	sscanf(buf, "%d ",&vib_strength);
+	if (vib_strength < 0 || vib_strength > 90)
+		vib_strength = 20;
+
+	return count;
+}
+
+static DEVICE_ATTR(vib_strength, (S_IWUSR|S_IRUGO),
+	vib_strength_show, vib_strength_dump);
+
 /*
  * INIT / EXIT stuff below here
  */
@@ -429,6 +454,10 @@ static int __init doubletap2wake_init(void)
 	rc = sysfs_create_file(android_touch_kobj, &dev_attr_doubletap2wake_version.attr);
 	if (rc) {
 		pr_warn("%s: sysfs_create_file failed for doubletap2wake_version\n", __func__);
+	}
+	rc = sysfs_create_file(android_touch_kobj, &dev_attr_vib_strength.attr);
+	if (rc) {
+		pr_warn("%s: sysfs_create_file failed for vib_strength\n", __func__);
 	}
 
 err_input_dev:
