@@ -38,6 +38,12 @@
 
 #include "SynaImage.h"
 
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+#include <linux/input/doubletap2wake.h>
+#endif
+#endif
+
 static struct workqueue_struct *synaptics_wq;
 
 /* RMI4 spec from 511-000405-01 Rev.D
@@ -1587,6 +1593,12 @@ static int synaptics_parse_dt(struct device *dev, struct touch_platform_data *pd
 
 static int synaptics_ts_start(struct synaptics_ts_data *ts)
 {
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+	bool prevent_sleep = false;
+	prevent_sleep = prevent_sleep || (dt2w_switch > 0);
+#endif
+#endif
 	TOUCH_DEBUG_TRACE("%s\n", __func__);
 
 	if (ts->curr_resume_state)
@@ -1604,11 +1616,22 @@ static int synaptics_ts_start(struct synaptics_ts_data *ts)
 	queue_delayed_work(synaptics_wq,
 			&ts->work_init, msecs_to_jiffies(BOOTING_DELAY));
 
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	if (prevent_sleep)
+		disable_irq_wake(ts->client->irq);
+#endif
+
 	return 0;
 }
 
 static int synaptics_ts_stop(struct synaptics_ts_data *ts)
 {
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+	bool prevent_sleep = false;
+	prevent_sleep = prevent_sleep || (dt2w_switch > 0);
+#endif
+#endif
 	TOUCH_DEBUG_TRACE("%s\n", __func__);
 
 	if (!ts->curr_resume_state) {
@@ -1622,10 +1645,19 @@ static int synaptics_ts_stop(struct synaptics_ts_data *ts)
 		return 0;
 	}
 
-	disable_irq(ts->client->irq);
-	cancel_delayed_work_sync(&ts->work_init);
-	release_all_ts_event(ts);
-	touch_power_cntl(ts, POWER_OFF);
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	if (!prevent_sleep)
+#endif
+	{
+		disable_irq(ts->client->irq);
+		cancel_delayed_work_sync(&ts->work_init);
+		release_all_ts_event(ts);
+		touch_power_cntl(ts, POWER_OFF);
+	}
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	if (prevent_sleep)
+		enable_irq_wake(ts->client->irq);
+#endif
 
 	return 0;
 }
@@ -1776,7 +1808,11 @@ static int synaptics_ts_probe(
 	gpio_direction_input(ts->pdata->irq_gpio);
 
 	ret = request_threaded_irq(client->irq, NULL, touch_irq_handler,
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+			IRQF_TRIGGER_FALLING | IRQF_ONESHOT | IRQF_NO_SUSPEND, client->name, ts);
+#else
 			IRQF_TRIGGER_FALLING | IRQF_ONESHOT, client->name, ts);
+#endif
 
 	if (ret < 0) {
 		TOUCH_ERR_MSG("request_irq failed. use polling mode\n");

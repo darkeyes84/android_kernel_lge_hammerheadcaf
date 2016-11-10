@@ -21,6 +21,12 @@
 #include <linux/leds.h>
 #include <linux/qpnp/pwm.h>
 #include <linux/err.h>
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+static bool gpio_overide = false;
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+#include <linux/input/doubletap2wake.h>
+#endif
+#endif
 
 #include <asm/system_info.h>
 
@@ -253,6 +259,12 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
 	int i, rc = 0;
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+	bool prevent_sleep = false;
+	prevent_sleep = prevent_sleep || (dt2w_switch > 0);
+#endif
+#endif
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -277,11 +289,17 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	pinfo = &(ctrl_pdata->panel_data.panel_info);
 
 	if (enable) {
-		rc = mdss_dsi_request_gpios(ctrl_pdata);
-		if (rc) {
-			pr_err("gpio request failed\n");
-			return rc;
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+		if (!gpio_overide)
+#endif
+		{
+			rc = mdss_dsi_request_gpios(ctrl_pdata);
+			if (rc) {
+				pr_err("gpio request failed\n");
+				return rc;
+			}
 		}
+
 		if (!pinfo->cont_splash_enabled) {
 			if (pinfo->on_pre_rst_delay) {
 				pr_debug("%s: on_pre_rst_delay:%d\n",
@@ -313,28 +331,37 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_debug("%s: Reset panel done\n", __func__);
 		}
 	} else {
-		if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
-			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
-			gpio_free(ctrl_pdata->disp_en_gpio);
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+		if (!prevent_sleep) {
+			gpio_overide = false;
+#endif
+			if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
+				gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
+				gpio_free(ctrl_pdata->disp_en_gpio);
+			}
+
+			if (pinfo->off_pre_rst_delay) {
+				pr_debug("%s: off_pre_rst_delay:%d\n",
+						__func__, pinfo->off_pre_rst_delay);
+				usleep(pinfo->off_pre_rst_delay * 1000);
+			}
+
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+			gpio_free(ctrl_pdata->rst_gpio);
+
+			if (pinfo->off_post_rst_delay) {
+				pr_debug("%s: off_post_rst_delay:%d\n",
+						__func__, pinfo->off_post_rst_delay);
+				usleep(pinfo->off_post_rst_delay * 1000);
+			}
+
+			if (gpio_is_valid(ctrl_pdata->mode_gpio))
+				gpio_free(ctrl_pdata->mode_gpio);
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+		} else {
+			gpio_overide = true;
 		}
-
-		if (pinfo->off_pre_rst_delay) {
-			pr_debug("%s: off_pre_rst_delay:%d\n",
-					__func__, pinfo->off_pre_rst_delay);
-			usleep(pinfo->off_pre_rst_delay * 1000);
-		}
-
-		gpio_set_value((ctrl_pdata->rst_gpio), 0);
-		gpio_free(ctrl_pdata->rst_gpio);
-
-		if (pinfo->off_post_rst_delay) {
-			pr_debug("%s: off_post_rst_delay:%d\n",
-					__func__, pinfo->off_post_rst_delay);
-			usleep(pinfo->off_post_rst_delay * 1000);
-		}
-
-		if (gpio_is_valid(ctrl_pdata->mode_gpio))
-			gpio_free(ctrl_pdata->mode_gpio);
+#endif
 	}
 	return rc;
 }
@@ -601,7 +628,12 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
-	struct mdss_panel_info *pinfo;
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+	bool prevent_sleep = false;
+	prevent_sleep = prevent_sleep || (dt2w_switch > 0);
+#endif
+#endif
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -619,6 +651,15 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	}
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
+
+#ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
+	if (prevent_sleep) {
+		ctrl->off_cmds.cmds[1].payload[0] = 0x11;
+	} else {
+		ctrl->off_cmds.cmds[1].payload[0] = 0x10;
+	}
+	pr_info("[prevent_touchscreen_sleep]: payload = %x \n", ctrl->off_cmds.cmds[1].payload[0]);
+#endif
 
 	mutex_lock(&panel_cmd_mutex);
 	if (ctrl->off_cmds.cmd_cnt)
