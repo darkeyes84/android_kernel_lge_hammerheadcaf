@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, 2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1929,7 +1929,7 @@ static int msm_compr_get_caps(struct snd_compr_stream *cstream,
 		memcpy(arg, &prtd->compr_cap, sizeof(struct snd_compr_caps));
 	} else {
 		ret = -EINVAL;
-		pr_err("%s: arg (0x%p), prtd (0x%p)\n", __func__, arg, prtd);
+		pr_err("%s: arg (0x%pK), prtd (0x%pK)\n", __func__, arg, prtd);
 	}
 
 	return ret;
@@ -2492,12 +2492,14 @@ static int msm_compr_gapless_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+#if !defined(CONFIG_SND_LGE_EFFECT) || !defined(CONFIG_SND_LGE_NORMALIZER) || !defined(CONFIG_SND_LGE_MABL)
 static const struct snd_kcontrol_new msm_compr_gapless_controls[] = {
 	SOC_SINGLE_EXT("Compress Gapless Playback",
 			0, 0, 1, 0,
 			msm_compr_gapless_get,
 			msm_compr_gapless_put),
 };
+#endif
 
 static int msm_compr_add_dec_runtime_params_control(
 						struct snd_soc_pcm_runtime *rtd)

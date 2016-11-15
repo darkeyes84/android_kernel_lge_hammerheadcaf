@@ -82,6 +82,7 @@ GRTAGS
 GSYMS
 GTAGS
 
+ramdisks/
 *.orig
 *.rej
 *~
