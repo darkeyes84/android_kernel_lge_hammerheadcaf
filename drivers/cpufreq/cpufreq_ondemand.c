@@ -635,7 +635,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 
 		min_f = policy->min;
 		max_f = policy->max;
-		freq_next = min_f + prev_load * (max_f - min_f) / dbs_tuners_ins.up_threshold;
+		freq_next = min_f + cur_load * (max_f - min_f) / dbs_tuners_ins.up_threshold;
 
 		/* No longer fully busy, reset rate_mult */
 		this_dbs_info->rate_mult = 1;
