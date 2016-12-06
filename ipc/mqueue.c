@@ -705,7 +705,7 @@ SYSCALL_DEFINE4(mq_open, const char __user *, u_name, int, oflag, umode_t, mode,
 
 	if (oflag & O_CREAT) {
 		if (dentry->d_inode) {	/* entry already exists */
-			audit_inode(name, dentry);
+			audit_inode(name, dentry, 0);
 			if (oflag & O_EXCL) {
 				error = -EEXIST;
 				goto out;
@@ -721,7 +721,7 @@ SYSCALL_DEFINE4(mq_open, const char __user *, u_name, int, oflag, umode_t, mode,
 			error = -ENOENT;
 			goto out;
 		}
-		audit_inode(name, dentry);
+		audit_inode(name, dentry, 0);
 		filp = do_open(ipc_ns, dentry, oflag);
 	}
 
@@ -878,7 +878,7 @@ SYSCALL_DEFINE5(mq_timedsend, mqd_t, mqdes, const char __user *, u_msg_ptr,
 		goto out_fput;
 	}
 	info = MQUEUE_I(inode);
-	audit_inode(NULL, filp->f_path.dentry);
+	audit_inode(NULL, filp->f_path.dentry, 0);
 
 	if (unlikely(!(filp->f_mode & FMODE_WRITE))) {
 		ret = -EBADF;
@@ -968,7 +968,7 @@ SYSCALL_DEFINE5(mq_timedreceive, mqd_t, mqdes, char __user *, u_msg_ptr,
 		goto out_fput;
 	}
 	info = MQUEUE_I(inode);
-	audit_inode(NULL, filp->f_path.dentry);
+	audit_inode(NULL, filp->f_path.dentry, 0);
 
 	if (unlikely(!(filp->f_mode & FMODE_READ))) {
 		ret = -EBADF;

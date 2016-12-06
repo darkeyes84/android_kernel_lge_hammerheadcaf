@@ -1792,7 +1792,7 @@ static int do_path_lookup(int dfd, const char *name,
 	if (likely(!retval)) {
 		if (unlikely(!audit_dummy_context())) {
 			if (nd->path.dentry && nd->inode)
-				audit_inode(name, nd->path.dentry);
+				audit_inode(name, nd->path.dentry, flags & LOOKUP_PARENT);
 		}
 	}
 	return retval;
@@ -2222,7 +2222,7 @@ static struct file *do_last(struct nameidata *nd, struct path *path,
 		error = complete_walk(nd);
 		if (error)
 			return ERR_PTR(error);
-		audit_inode(pathname, nd->path.dentry);
+		audit_inode(pathname, nd->path.dentry, 0);
 		if (open_flag & O_CREAT) {
 			error = -EISDIR;
 			goto exit;
@@ -2232,7 +2232,7 @@ static struct file *do_last(struct nameidata *nd, struct path *path,
 		error = complete_walk(nd);
 		if (error)
 			return ERR_PTR(error);
-		audit_inode(pathname, dir);
+		audit_inode(pathname, dir, 0);
 		goto ok;
 	}
 
@@ -2259,7 +2259,7 @@ static struct file *do_last(struct nameidata *nd, struct path *path,
 			if (!nd->inode->i_op->lookup)
 				goto exit;
 		}
-		audit_inode(pathname, nd->path.dentry);
+		audit_inode(pathname, nd->path.dentry, 0);
 		goto ok;
 	}
 
@@ -2272,7 +2272,7 @@ static struct file *do_last(struct nameidata *nd, struct path *path,
 	if (error)
 		return ERR_PTR(error);
 
-	audit_inode(pathname, dir);
+	audit_inode(pathname, dir, 0);
 	error = -EISDIR;
 	/* trailing slashes? */
 	if (nd->last.name[nd->last.len])
@@ -2326,7 +2326,7 @@ static struct file *do_last(struct nameidata *nd, struct path *path,
 	 * It already exists.
 	 */
 	mutex_unlock(&dir->d_inode->i_mutex);
-	audit_inode(pathname, path->dentry);
+	audit_inode(pathname, path->dentry, 0);
 
 	error = -EEXIST;
 	if (open_flag & O_EXCL)
