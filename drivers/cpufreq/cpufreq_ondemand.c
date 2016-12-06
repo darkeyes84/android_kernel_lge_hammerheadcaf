@@ -631,8 +631,11 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 	 */
 	if (max_load_freq <
 	    (dbs_tuners_ins.up_threshold * policy->cur)) {
-		unsigned int freq_next;
-		freq_next = max_load_freq / dbs_tuners_ins.up_threshold;
+		unsigned int freq_next, min_f, max_f;
+
+		min_f = policy->min;
+		max_f = policy->max;
+		freq_next = min_f + prev_load * (max_f - min_f) / dbs_tuners_ins.up_threshold;
 
 		/* No longer fully busy, reset rate_mult */
 		this_dbs_info->rate_mult = 1;
@@ -655,7 +658,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 
 		}
 		__cpufreq_driver_target(policy, freq_next,
-				CPUFREQ_RELATION_L);
+				CPUFREQ_RELATION_C);
 	}
 }
 
