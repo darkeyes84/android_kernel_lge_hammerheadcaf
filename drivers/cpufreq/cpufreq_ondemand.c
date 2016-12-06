@@ -529,16 +529,18 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		 * - during long idle intervals
 		 * - explicitly set to zero
 		 */
-		if (unlikely(wall_time > (2 * sampling_rate) &&
-					j_dbs_info->prev_load)) {
-			cur_load = j_dbs_info->prev_load;
-			j_dbs_info->max_load = cur_load;
-			/*
-			 * Perform a destructive copy, to ensure that we copy
-			 * the previous load only once, upon the first wake-up
-			 * from idle.
-			 */
-			j_dbs_info->prev_load = 0;
+		if (unlikely(wall_time > (2 * sampling_rate))) /*&&
+			     j_dbs_info->prev_load))*/ {
+			unsigned int n_load = 100 * (wall_time - idle_time) / wall_time;
+			unsigned int new_load;
+			unsigned int busy = wall_time - idle_time;
+			if (busy > sampling_rate)
+				new_load = 100;
+			else
+				new_load = 100 * busy / sampling_rate;
+			cur_load = new_load;
+			pr_debug("Idle cpu: %u, wall_time: %u, prev_load: %u, load: %u, new_load: %u\n",
+				j, wall_time, j_dbs_info->prev_load, n_load, new_load);
 		} else {
 			cur_load = 100 * (wall_time - idle_time) / wall_time;
 			j_dbs_info->max_load = max(cur_load, j_dbs_info->prev_load);
