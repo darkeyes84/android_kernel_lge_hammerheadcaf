@@ -1198,10 +1198,10 @@ int audit_comparator(u32 left, u32 op, u32 right)
 	}
 }
 
-+/**
- + * parent_len - find the length of the parent portion of a pathname
- + * @path: pathname of which to determine length
- + */
+/**
+ * parent_len - find the length of the parent portion of a pathname
+ * @path: pathname of which to determine length
+ */
 int parent_len(const char *path)
 {
 	int plen;
