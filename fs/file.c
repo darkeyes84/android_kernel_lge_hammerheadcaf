@@ -587,11 +587,11 @@ int alloc_fd(unsigned start, unsigned flags)
 	return __alloc_fd(current->files, start, rlimit(RLIMIT_NOFILE), flags);
 }
 
-int get_unused_fd(void)
+int get_unused_fd(unsigned flags)
 {
 	return __alloc_fd(current->files, 0, rlimit(RLIMIT_NOFILE), flags);
 }
-EXPORT_SYMBOL(get_unused_fd);
+EXPORT_SYMBOL(get_unused_fd_flags);
 
 static void __put_unused_fd(struct files_struct *files, unsigned int fd)
 {
