@@ -4247,7 +4247,7 @@ static int __init binder_init(void)
 	int ret;
 	char *device_name, *device_names;
 	struct binder_device *device;
-	struct hlist_node *tmp;
+	struct hlist_node *node, *tmp;
 
 	binder_debugfs_dir_entry_root = debugfs_create_dir("binder", NULL);
 	if (binder_debugfs_dir_entry_root)
@@ -4302,7 +4302,7 @@ static int __init binder_init(void)
 	return ret;
 
 err_init_binder_device_failed:
-	hlist_for_each_entry_safe(device, tmp, &binder_devices, hlist) {
+	hlist_for_each_entry_safe(device, node, tmp, &binder_devices, hlist) {
 		misc_deregister(&device->miscdev);
 		hlist_del(&device->hlist);
 		kfree(device);
