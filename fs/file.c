@@ -607,7 +607,6 @@ EXPORT_SYMBOL(put_unused_fd);
 void __fd_install(struct files_struct *files, unsigned int fd,
 		struct file *file)
 {
-	struct files_struct *files = current->files;
 	struct fdtable *fdt;
 	spin_lock(&files->file_lock);
 	fdt = files_fdtable(files);
