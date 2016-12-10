@@ -1224,7 +1224,8 @@ static void binder_send_failed_reply(struct binder_transaction *t,
 			if (target_thread->return_error == BR_OK) {
 				binder_debug(BINDER_DEBUG_FAILED_TRANSACTION,
 					     "send failed reply for transaction %d to %d:%d\n",
-					      t->debug_id, target_thread->proc->pid,
+					      t->debug_id,
+					      target_thread->proc->pid,
 					      target_thread->pid);
 
 				binder_pop_transaction(target_thread, t);
@@ -2018,16 +2019,16 @@ static int binder_thread_write(struct binder_proc *proc,
 		case BC_REQUEST_DEATH_NOTIFICATION:
 		case BC_CLEAR_DEATH_NOTIFICATION: {
 			uint32_t target;
-			void __user *cookie;
+			binder_uintptr_t cookie;
 			struct binder_ref *ref;
 			struct binder_ref_death *death;
 
-			if (get_user(target, (uint32_t __user *)ptr))
+			if (get_user(cookie, (binder_uintptr_t __user *)ptr))
 				return -EFAULT;
 			ptr += sizeof(uint32_t);
 			if (get_user(cookie, (void __user * __user *)ptr))
 				return -EFAULT;
-			ptr += sizeof(void *);
+			ptr += sizeof(binder_uintptr_t);
 			ref = binder_get_ref(proc, target, false);
 			if (ref == NULL) {
 				binder_user_error("%d:%d %s invalid ref %d\n",
@@ -2327,32 +2328,40 @@ retry:
 				if (put_user(cmd, (uint32_t __user *)ptr))
 					return -EFAULT;
 				ptr += sizeof(uint32_t);
-				if (put_user(node->ptr, (void * __user *)ptr))
+				if (put_user(node->ptr,
+					     (binder_uintptr_t __user *)ptr))
 					return -EFAULT;
-				ptr += sizeof(void *);
-				if (put_user(node->cookie, (void * __user *)ptr))
+				ptr += sizeof(binder_uintptr_t);
+				if (put_user(node->cookie,
+					     (binder_uintptr_t __user *)ptr))
 					return -EFAULT;
-				ptr += sizeof(void *);
+				ptr += sizeof(binder_uintptr_t);
 
 				binder_stat_br(proc, thread, cmd);
 				binder_debug(BINDER_DEBUG_USER_REFS,
-					     "%d:%d %s %d u%p c%p\n",
-					     proc->pid, thread->pid, cmd_name, node->debug_id, node->ptr, node->cookie);
+					     "%d:%d %s %d u%016llx c%016llx\n",
+					     proc->pid, thread->pid, cmd_name,
+					     node->debug_id,
+					     (u64)node->ptr, (u64)node->cookie);
 			} else {
 				list_del_init(&w->entry);
 				if (!weak && !strong) {
 					binder_debug(BINDER_DEBUG_INTERNAL_REFS,
-						     "%d:%d node %d u%p c%p deleted\n",
-						     proc->pid, thread->pid, node->debug_id,
-						     node->ptr, node->cookie);
+						     "%d:%d node %d u%016llx c%016llx deleted\n",
+						     proc->pid, thread->pid,
+						     node->debug_id,
+						     (u64)node->ptr,
+						     (u64)node->cookie);
 					rb_erase(&node->rb_node, &proc->nodes);
 					kfree_no_resched(node);
 					binder_stats_deleted(BINDER_STAT_NODE);
 				} else {
 					binder_debug(BINDER_DEBUG_INTERNAL_REFS,
-						     "%d:%d node %d u%p c%p state unchanged\n",
-						     proc->pid, thread->pid, node->debug_id, node->ptr,
-						     node->cookie);
+						     "%d:%d node %d u%016llx c%016llx state unchanged\n",
+						     proc->pid, thread->pid,
+						     node->debug_id,
+						     (u64)node->ptr,
+						     (u64)node->cookie);
 				}
 			}
 		} break;
