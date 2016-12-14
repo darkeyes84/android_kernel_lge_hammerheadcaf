@@ -510,13 +510,8 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		 * task is. This is undesirable for latency-sensitive bursty
 		 * workloads.
 		 *
-		 * To avoid this, we reuse the 'load' from the previous
-		 * time-window and give this task a chance to start with a
-		 * reasonably high CPU frequency. (However, we shouldn't over-do
-		 * this copy, lest we get stuck at a high load (high frequency)
-		 * for too long, even when the current system load has actually
-		 * dropped down. So we perform the copy only once, upon the
-		 * first wake-up from idle.)
+		 * To avoid this, we calculate 'load' only on the last
+		 * sampling period.
 		 *
 		 *
 		 * Detecting this situation is easy: the governor's deferrable
@@ -525,22 +520,23 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		 * rate) indicates this scenario.
 		 *
 		 * prev_load can be zero in two cases and we must recalculate it
-		 * for both cases:
-		 * - during long idle intervals
-		 * - explicitly set to zero
+ 		 * for both cases:
+  		 * - during long idle intervals
+  		 * - explicitly set to zero
 		 */
-		if (unlikely(wall_time > (2 * sampling_rate))) /*&&
-			     j_dbs_info->prev_load))*/ {
-			unsigned int n_load = 100 * (wall_time - idle_time) / wall_time;
-			unsigned int new_load;
+		if (unlikely(wall_time > (2 * sampling_rate))) {
 			unsigned int busy = wall_time - idle_time;
 			if (busy > sampling_rate)
-				new_load = 100;
+				cur_load = 100;
 			else
-				new_load = 100 * busy / sampling_rate;
-			cur_load = new_load;
-			pr_debug("Idle cpu: %u, wall_time: %u, prev_load: %u, load: %u, new_load: %u\n",
-				j, wall_time, j_dbs_info->prev_load, n_load, new_load);
+				cur_load = 100 * busy / sampling_rate;
+			j_dbs_info->max_load = cur_load;
+			/*
+			 * Perform a destructive copy, to ensure that we copy
+			 * the previous load only once, upon the first wake-up
+			 * from idle.
+			 */
+			j_dbs_info->prev_load = 0;
 		} else {
 			cur_load = 100 * (wall_time - idle_time) / wall_time;
 			j_dbs_info->max_load = max(cur_load, j_dbs_info->prev_load);
