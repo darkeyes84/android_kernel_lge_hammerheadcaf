@@ -90,7 +90,6 @@ struct cpu_dbs_info_s {
 	 * the previous load to the current interval only once, upon the first
 	 * wake-up from idle.
 	 */
-	unsigned int prev_load;
 	struct cpufreq_policy *cur_policy;
 	struct delayed_work work;
 	struct cpufreq_frequency_table *freq_table;
@@ -519,10 +518,6 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		 * an unusually large 'wall_time' (as compared to the sampling
 		 * rate) indicates this scenario.
 		 *
-		 * prev_load can be zero in two cases and we must recalculate it
- 		 * for both cases:
-  		 * - during long idle intervals
-  		 * - explicitly set to zero
 		 */
 		if (unlikely(wall_time > (2 * sampling_rate))) {
 			unsigned int busy = wall_time - idle_time;
@@ -531,16 +526,9 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 			else
 				cur_load = 100 * busy / sampling_rate;
 			j_dbs_info->max_load = cur_load;
-			/*
-			 * Perform a destructive copy, to ensure that we copy
-			 * the previous load only once, upon the first wake-up
-			 * from idle.
-			 */
-			j_dbs_info->prev_load = 0;
 		} else {
 			cur_load = 100 * (wall_time - idle_time) / wall_time;
-			j_dbs_info->max_load = max(cur_load, j_dbs_info->prev_load);
-			j_dbs_info->prev_load = cur_load;
+			j_dbs_info->max_load = cur_load;
 		}
 
 		freq_avg = __cpufreq_driver_getavg(policy, j);
@@ -735,18 +723,12 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		dbs_enable++;
 		for_each_cpu(j, policy->cpus) {
 			struct cpu_dbs_info_s *j_dbs_info;
-			unsigned int prev_load;
 
 			j_dbs_info = &per_cpu(od_cpu_dbs_info, j);
 			j_dbs_info->cur_policy = policy;
 
 			j_dbs_info->prev_cpu_idle = get_cpu_idle_time(j,
 					&j_dbs_info->prev_cpu_wall, 0);
-
-			prev_load = (unsigned int)
-				(j_dbs_info->prev_cpu_wall - j_dbs_info->prev_cpu_idle);
-			j_dbs_info->prev_load = 100 * prev_load /
-				(unsigned int) j_dbs_info->prev_cpu_wall;
 		}
 		cpu = policy->cpu;
 		this_dbs_info->cpu = cpu;
