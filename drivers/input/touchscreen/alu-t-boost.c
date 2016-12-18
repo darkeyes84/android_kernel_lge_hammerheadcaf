@@ -31,6 +31,7 @@
 #include <linux/input.h>
 #include <linux/time.h>
 #include <linux/msm_thermal.h>
+#include <linux/fsync.h>
 
 /*
  * debug = 1 will print all
@@ -80,6 +81,8 @@ static void do_input_boost_rem(struct work_struct *work)
 {
 	unsigned int cpu;
 
+	set_fsync(true);
+
 	for_each_possible_cpu(cpu) {
 		if (limit.user_boost_freq_lock[cpu] > 0) {
 			dprintk("Removing input boost for CPU%u\n", cpu);
@@ -114,6 +117,8 @@ static void do_input_boost(struct work_struct *work)
 		if (input_boost_freq < 300000)
 			input_boost_freq = 960000;
 	}
+
+	set_fsync(false);
 
 	for (cpu = 0; cpu < nr_cpus; cpu++) {
 		struct cpufreq_policy policy;
