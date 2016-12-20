@@ -53,7 +53,7 @@ export KBUILD_BUILD_USER="aexon";
 export KBUILD_BUILD_HOST="BuildBox";
 
 # system compiler
-export CROSS_COMPILE=/home/aexon/android-toolchain/bin/arm-eabi-
+export CROSS_COMPILE=/home/aexon/toolchains/android-toolchain/bin/arm-eabi-
 
 if [ ! -f ${CROSS_COMPILE}gcc ]; then
 	echo "${bldred}Cannot find GCC compiler ${CROSS_COMPILE}gcc${txtrst}";
