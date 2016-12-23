@@ -45,8 +45,10 @@ module_param_named(reclaim_avg_efficiency, reclaim_avg_efficiency,
 /* The vmpressure region where process reclaim operates */
 static unsigned long pressure_min = 50;
 static unsigned long pressure_max = 90;
+static unsigned long process_reclaim_pressure = 0;
 module_param_named(pressure_min, pressure_min, ulong, S_IRUGO | S_IWUSR);
 module_param_named(pressure_max, pressure_max, ulong, S_IRUGO | S_IWUSR);
+module_param_named(process_reclaim_pressure, process_reclaim_pressure, ulong, 0444);
 
 /*
  * Scheduling process reclaim workqueue unecessarily
@@ -221,6 +223,8 @@ static int vmpressure_notifier(struct notifier_block *nb,
 
 	if (!enable_process_reclaim)
 		return 0;
+
+	process_reclaim_pressure = action;
 
 	if (!current_is_kswapd())
 		return 0;
