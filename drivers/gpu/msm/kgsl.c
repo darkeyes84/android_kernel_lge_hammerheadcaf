@@ -4791,6 +4791,8 @@ static int __init kgsl_core_init(void)
 
 	kgsl_events_init();
 
+	kgsl_heap_init();
+
 	return 0;
 
 err:
