@@ -83,7 +83,7 @@ static unsigned long lowmem_deathpending_timeout;
 static atomic_t shift_adj = ATOMIC_INIT(0);
 static short adj_max_shift = 353;
 
-#define VM_PRESSURE_ADAPTIVE_START	85
+#define VM_PRESSURE_ADAPTIVE_START	90
 #define VM_PRESSURE_ADAPTIVE_STOP	95
 
 /* User knob to enable/disable adaptive lmk feature */
@@ -128,7 +128,7 @@ int adjust_minadj(short *min_score_adj)
 	return ret;
 }
 
-static unsigned long lmk_vm_pressure = 0;
+static unsigned long vm_pressure = 0;
 
 static int lmk_vmpressure_notifier(struct notifier_block *nb,
 			unsigned long action, void *data)
@@ -143,8 +143,8 @@ static int lmk_vmpressure_notifier(struct notifier_block *nb,
 		return 0;
 	}
 
-	/* update lmk_vm_pressure state */
-	lmk_vm_pressure = action;
+	/* update vm_pressure state */
+	vm_pressure = pressure;
 
 	if (pressure >= VM_PRESSURE_ADAPTIVE_STOP) {
 		other_file = global_page_state(NR_FILE_PAGES) -
@@ -538,10 +538,10 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 				(long)(PAGE_SIZE / 1024),
 			     sc->gfp_mask);
 
-		if (lmk_vm_pressure >= VM_PRESSURE_ADAPTIVE_START)
-			lowmem_print(1, "VM Pressure is %lu\n", lmk_vm_pressure);
+		if (vm_pressure >= VM_PRESSURE_ADAPTIVE_START)
+			lowmem_print(1, "VM Pressure is %lu\n", vm_pressure);
 		else
-			lowmem_print(2, "VM Pressure is %lu\n", lmk_vm_pressure);
+			lowmem_print(2, "VM Pressure is %lu\n", vm_pressure);
 
 		if (lowmem_debug_level >= 2 && selected_oom_score_adj == 0) {
 			show_mem(SHOW_MEM_FILTER_NODES);
@@ -678,7 +678,6 @@ module_param_array_named(minfree, lowmem_minfree, uint, &lowmem_minfree_size,
 			 S_IRUGO | S_IWUSR);
 module_param_named(debug_level, lowmem_debug_level, uint, S_IRUGO | S_IWUSR);
 module_param_named(lmk_fast_run, lmk_fast_run, int, S_IRUGO | S_IWUSR);
-module_param_named(lmk_vm_pressure, lmk_vm_pressure, ulong, 0444);
 
 module_init(lowmem_init);
 module_exit(lowmem_exit);
