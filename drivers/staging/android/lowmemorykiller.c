@@ -83,9 +83,6 @@ static unsigned long lowmem_deathpending_timeout;
 static atomic_t shift_adj = ATOMIC_INIT(0);
 static short adj_max_shift = 353;
 
-#define VM_PRESSURE_ADAPTIVE_START	90
-#define VM_PRESSURE_ADAPTIVE_STOP	95
-
 /* User knob to enable/disable adaptive lmk feature */
 static int enable_adaptive_lmk;
 module_param_named(enable_adaptive_lmk, enable_adaptive_lmk, int,
@@ -128,8 +125,6 @@ int adjust_minadj(short *min_score_adj)
 	return ret;
 }
 
-static unsigned long vm_pressure = 0;
-
 static int lmk_vmpressure_notifier(struct notifier_block *nb,
 			unsigned long action, void *data)
 {
@@ -143,10 +138,7 @@ static int lmk_vmpressure_notifier(struct notifier_block *nb,
 		return 0;
 	}
 
-	/* update vm_pressure state */
-	vm_pressure = pressure;
-
-	if (pressure >= VM_PRESSURE_ADAPTIVE_STOP) {
+	if (pressure >= 95) {
 		other_file = global_page_state(NR_FILE_PAGES) -
 			global_page_state(NR_SHMEM) -
 			global_page_state(NR_UNEVICTABLE) -
@@ -155,7 +147,7 @@ static int lmk_vmpressure_notifier(struct notifier_block *nb,
 
 		atomic_set(&shift_adj, 1);
 		trace_almk_vmpressure(pressure, other_free, other_file);
-	} else if (pressure >= VM_PRESSURE_ADAPTIVE_START) {
+	} else if (pressure >= 90) {
 		if (lowmem_adj_size < array_size)
 			array_size = lowmem_adj_size;
 		if (lowmem_minfree_size < array_size)
@@ -537,11 +529,6 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 			     global_page_state(NR_SLAB_UNRECLAIMABLE) *
 				(long)(PAGE_SIZE / 1024),
 			     sc->gfp_mask);
-
-		if (vm_pressure >= VM_PRESSURE_ADAPTIVE_START)
-			lowmem_print(1, "VM Pressure is %lu\n", vm_pressure);
-		else
-			lowmem_print(2, "VM Pressure is %lu\n", vm_pressure);
 
 		if (lowmem_debug_level >= 2 && selected_oom_score_adj == 0) {
 			show_mem(SHOW_MEM_FILTER_NODES);
