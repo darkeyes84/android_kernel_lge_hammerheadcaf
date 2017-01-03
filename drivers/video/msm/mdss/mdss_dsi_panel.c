@@ -33,6 +33,13 @@ static struct mdss_dsi_ctrl_pdata *local_ctrl;
 static struct work_struct send_cmds_work;
 static struct kobject *module_kobj;
 
+bool display_on = true;
+
+bool is_display_on(void)
+{
+        return display_on;
+}
+
 static DEFINE_MUTEX(panel_cmd_mutex);
 
 #define MIN_REFRESH_RATE 30
@@ -567,6 +574,8 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		return -EINVAL;
 	}
 
+	display_on = true;
+
 	pinfo = &pdata->panel_info;
 
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -615,6 +624,8 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 	mutex_unlock(&panel_cmd_mutex);
+
+	display_on = false;
 
 	pdata->panel_info.blank_state = MDSS_PANEL_BLANK_BLANK;
 	pr_debug("%s:-\n", __func__);
