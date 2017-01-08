@@ -406,8 +406,17 @@ static int parse_header(void)
 			return -EINVAL;
 		}
 		img->firmware_data = fwu->data_buffer + FW_IMAGE_OFFSET;
+	}
 	/* get config offset*/
-	if (img->config_size)
+	if (img->config_size) {
+		// FW_IMAGE_OFFSET + image_size was ok as above
+		if (!in_bounds(FW_IMAGE_OFFSET + img->image_size,
+			       img->config_size, fwu->full_update_size)) {
+			dev_err(&fwu->rmi4_data->i2c_client->dev,
+				"%s: config size out of bounds\n",
+				__func__);
+			return -EINVAL;
+		}
 		img->config_data = fwu->data_buffer + FW_IMAGE_OFFSET +
 				img->image_size;
 	}
